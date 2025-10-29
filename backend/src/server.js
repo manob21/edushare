@@ -2,6 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const connectDatabase = require('./config/database');
+const authRoutes = require('./routes/authRoutes');
 
 // Load environment variables
 dotenv.config();
@@ -33,6 +34,9 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date()
   });
 });
+
+// Routes
+app.use('/api/auth', authRoutes);
 
 // Error handling for uncaught exceptions
 process.on('uncaughtException', (err) => {
