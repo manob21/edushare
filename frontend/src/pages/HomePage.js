@@ -38,6 +38,10 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [subjects, setSubjects] = useState(DEFAULT_SUBJECTS);
+  const [showDocumentModal, setShowDocumentModal] = useState(false);
+  const [documentListType, setDocumentListType] = useState(''); // 'uploaded' or 'downloaded'
+  const [userDocuments, setUserDocuments] = useState([]);
+  const [loadingDocuments, setLoadingDocuments] = useState(false);
 
   // Form states
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
@@ -128,6 +132,46 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchUserDocuments = async (type) => {
+    setLoadingDocuments(true);
+    try {
+      const token = localStorage.getItem('token');
+      const endpoint = type === 'uploaded' 
+        ? `${API_URL}/resource/my-uploads` 
+        : `${API_URL}/resource/my-downloads`;
+      
+      const response = await fetch(endpoint, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        setUserDocuments(data.resources);
+      } else {
+        alert(data.message || 'Failed to fetch documents');
+      }
+    } catch (error) {
+      console.error('Error fetching user documents:', error);
+      alert('Error fetching documents');
+    } finally {
+      setLoadingDocuments(false);
+    }
+  };
+
+  const handleViewDocuments = (type) => {
+    setDocumentListType(type);
+    setShowDocumentModal(true);
+    fetchUserDocuments(type);
+  };
+
+  const handleCloseDocumentModal = () => {
+    setShowDocumentModal(false);
+    setUserDocuments([]);
+    setDocumentListType('');
   };
 
   const handleDownload = async (resourceId) => {
@@ -363,6 +407,11 @@ export default function HomePage() {
     }
   };
 
+  const handleAuthButtonClick = () => {
+    setAuthMode("login");
+    setShowAuthModal(true);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -380,12 +429,19 @@ export default function HomePage() {
               <span>⬆️</span>
               Upload Document
             </button>
-            {isAuthenticated && (
+            {isAuthenticated ? (
               <button
                 onClick={handleLogout}
-                className="text-gray-600 hover:text-gray-900 font-medium"
+                className="text-gray-600 hover:text-gray-900 font-medium px-4 py-2"
               >
                 Logout
+              </button>
+            ) : (
+              <button
+                onClick={handleAuthButtonClick}
+                className="text-indigo-600 hover:text-indigo-700 font-medium px-4 py-2 border-2 border-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors"
+              >
+                Login / Sign Up
               </button>
             )}
           </div>
@@ -439,7 +495,7 @@ export default function HomePage() {
               </div>
 
               {/* Quick Stats */}
-              <div className="border-t pt-4">
+              <div className="border-t pt-4 mb-4">
                 <h3 className="text-sm font-semibold text-gray-700 mb-3">Quick Stats</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
@@ -451,6 +507,25 @@ export default function HomePage() {
                     <span className="font-semibold">{userUploads}</span>
                   </div>
                 </div>
+              </div>
+
+              {/* View Documents Buttons */}
+              <div className="border-t pt-4 space-y-2">
+                <button
+                  onClick={() => handleViewDocuments('uploaded')}
+                  className="w-full bg-indigo-100 hover:bg-indigo-200 text-indigo-700 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  <span>📤</span>
+                  View Uploaded Docs
+                </button>
+                <button
+                  onClick={() => handleViewDocuments('downloaded')}
+                  className="w-full bg-green-100 hover:bg-green-200 text-green-700 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                  disabled={userDownloads === 0}
+                >
+                  <span>📥</span>
+                  View Downloaded Docs
+                </button>
               </div>
             </div>
           </aside>
@@ -586,6 +661,88 @@ export default function HomePage() {
           </section>
         </main>
       </div>
+
+      {/* Document List Modal */}
+      {showDocumentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-gray-900">
+                {documentListType === 'uploaded' ? '📤 My Uploaded Documents' : '📥 My Downloaded Documents'}
+              </h2>
+              <button
+                onClick={handleCloseDocumentModal}
+                className="text-gray-400 hover:text-gray-600 text-2xl"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {loadingDocuments ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">Loading documents...</p>
+                </div>
+              ) : userDocuments.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">
+                    {documentListType === 'uploaded' 
+                      ? 'You haven\'t uploaded any documents yet.' 
+                      : 'You haven\'t downloaded any documents yet.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {userDocuments.map((doc) => (
+                    <div
+                      key={doc._id}
+                      className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-indigo-300 transition-colors"
+                    >
+                      <div className="flex items-center gap-4 flex-1">
+                        <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center text-2xl">
+                          📄
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-gray-900">{doc.title}</h3>
+                          <p className="text-sm text-gray-500">{doc.subject}</p>
+                          <p className="text-xs text-gray-400 mt-1">
+                            {doc.description.substring(0, 60)}
+                            {doc.description.length > 60 ? '...' : ''}
+                          </p>
+                          {documentListType === 'downloaded' && doc.uploadedBy && (
+                            <p className="text-xs text-gray-400 mt-1">
+                              Uploaded by {doc.uploadedBy.name}
+                            </p>
+                          )}
+                          <p className="text-xs text-gray-400 mt-1">
+                            {new Date(doc.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {doc.downloadCount !== undefined && (
+                          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                            {doc.downloadCount} downloads
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-gray-200 bg-gray-50">
+              <button
+                onClick={handleCloseDocumentModal}
+                className="w-full bg-gray-600 hover:bg-gray-700 text-white py-2.5 rounded-lg font-medium transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Upload Modal */}
       {showUploadModal && (

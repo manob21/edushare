@@ -175,12 +175,13 @@ router.get('/download/:id', protect, async (req, res) => {
       });
     }
 
-    // Increment user's download count
+    // Increment user's download count and add to downloadedResources
     await User.findByIdAndUpdate(req.user._id, {
-      $inc: { downloadCount: 1 }
+      $inc: { downloadCount: 1 },
+      $addToSet: { downloadedResources: req.params.id } // Prevent duplicates
     });
 
-    // Increment resource's download count (optional)
+    // Increment resource's download count
     await Resource.findByIdAndUpdate(req.params.id, {
       $inc: { downloadCount: 1 }
     });
@@ -196,6 +197,52 @@ router.get('/download/:id', protect, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Download failed',
+      error: error.message
+    });
+  }
+});
+
+// Get user's uploaded resources
+router.get('/my-uploads', protect, async (req, res) => {
+  try {
+    const resources = await Resource.find({ uploadedBy: req.user._id })
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: resources.length,
+      resources
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching uploaded resources',
+      error: error.message
+    });
+  }
+});
+
+// Get user's downloaded resources
+router.get('/my-downloads', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .populate({
+        path: 'downloadedResources',
+        populate: {
+          path: 'uploadedBy',
+          select: 'name email'
+        }
+      });
+
+    res.status(200).json({
+      success: true,
+      count: user.downloadedResources ? user.downloadedResources.length : 0,
+      resources: user.downloadedResources || []
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching downloaded resources',
       error: error.message
     });
   }
