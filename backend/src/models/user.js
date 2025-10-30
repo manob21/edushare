@@ -17,7 +17,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Please provide a password'],
     minlength: 6,
-    select: false // This hides password by default in queries
+    select: false
   },
   uploadCount: {
     type: Number,

@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
 
 const SUBJECTS = [
   "Computer Science",
@@ -12,41 +11,15 @@ const SUBJECTS = [
   "Economics",
 ];
 
-const POPULAR_MATERIALS = [
-  {
-    id: 1,
-    title: "Data Structures & Algorithms",
-    subject: "Computer Science",
-    uploads: 234,
-  },
-  {
-    id: 2,
-    title: "Calculus Notes - Chapter 1-5",
-    subject: "Mathematics",
-    uploads: 189,
-  },
-  {
-    id: 3,
-    title: "Organic Chemistry Complete Guide",
-    subject: "Chemistry",
-    uploads: 156,
-  },
-  {
-    id: 4,
-    title: "Quantum Physics Lecture Notes",
-    subject: "Physics",
-    uploads: 142,
-  },
-];
-
 const API_URL = 'http://localhost:5000/api';
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authMode, setAuthMode] = useState("login"); // 'login' or 'signup'
+  const [authMode, setAuthMode] = useState("login");
   const [userUploads, setUserUploads] = useState(0);
+  const [userDownloads, setUserDownloads] = useState(0);
   const [user, setUser] = useState({
     name: "",
     email: "",
@@ -60,6 +33,9 @@ export default function HomePage() {
     file: null,
   });
   const [uploading, setUploading] = useState(false);
+  const [resources, setResources] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedSubject, setSelectedSubject] = useState(null);
 
   // Form states
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
@@ -73,7 +49,65 @@ export default function HomePage() {
   const canDownload = userUploads >= 3;
   const uploadsNeeded = 3 - userUploads;
 
-  const handleDownload = (materialId) => {
+  // Fetch resources on component mount
+  useEffect(() => {
+    fetchResources();
+  }, [selectedSubject]);
+
+  // Check if user is logged in on mount
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetchCurrentUser();
+    }
+  }, []);
+
+  const fetchCurrentUser = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/auth/me`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        setUser({
+          name: data.user.name,
+          email: data.user.email,
+          avatar: null,
+        });
+        setUserUploads(data.user.uploadCount);
+        setUserDownloads(data.user.downloadCount);
+        setIsAuthenticated(true);
+      }
+    } catch (error) {
+      console.error('Error fetching user:', error);
+    }
+  };
+
+  const fetchResources = async () => {
+    try {
+      setLoading(true);
+      const endpoint = selectedSubject 
+        ? `${API_URL}/resource/subject/${selectedSubject}`
+        : `${API_URL}/resource/all`;
+      
+      const response = await fetch(endpoint);
+      const data = await response.json();
+
+      if (response.ok) {
+        setResources(data.resources);
+      }
+    } catch (error) {
+      console.error('Error fetching resources:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownload = async (resourceId) => {
     if (!isAuthenticated) {
       setShowAuthModal(true);
       setAuthMode("login");
@@ -84,10 +118,54 @@ export default function HomePage() {
       alert(`Upload ${uploadsNeeded} more document${uploadsNeeded > 1 ? 's' : ''} to unlock downloads!`);
       return;
     }
-    
-    console.log(`Downloading material ${materialId}`);
+
+    try {
+      const token = localStorage.getItem('token');
+      
+      // Create a temporary link to trigger download
+      const response = await fetch(`${API_URL}/resource/download/${resourceId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        // Get the filename from Content-Disposition header
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `resource-${resourceId}`;
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+          if (filenameMatch) {
+            filename = filenameMatch[1];
+          }
+        }
+
+        // Convert response to blob and trigger download
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+
+        // Refresh user data to update download count
+        await fetchCurrentUser();
+        
+        alert('Download started successfully!');
+      } else {
+        const data = await response.json();
+        alert(data.message || 'Download failed');
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      alert('Error downloading resource');
+    }
   };
-  // Show upload modal only if authenticated
+
   const handleUploadClick = () => {
     if (!isAuthenticated) {
       setShowAuthModal(true);
@@ -101,10 +179,10 @@ export default function HomePage() {
     setUploadForm({ ...uploadForm, file: e.target.files[0] });
   };
 
-  // Handle upload form submit
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
     setUploading(true);
+
     try {
       const token = localStorage.getItem("token");
       const formData = new FormData();
@@ -132,9 +210,16 @@ export default function HomePage() {
       alert("Resource uploaded successfully!");
       setShowUploadModal(false);
       setUploadForm({ title: "", subject: "", description: "", file: null });
-      // Optionally, refresh user uploads count here
+      
+      // Update user upload count
+      setUserUploads(data.user.uploadCount);
+      setUserDownloads(data.user.downloadCount);
+      
+      // Refresh resources list
+      fetchResources();
     } catch (error) {
       setUploading(false);
+      console.error('Upload error:', error);
       alert("Error uploading resource");
     }
   };
@@ -158,7 +243,6 @@ export default function HomePage() {
         return;
       }
 
-      // Save token to localStorage
       localStorage.setItem('token', data.token);
       
       setUser({
@@ -167,6 +251,7 @@ export default function HomePage() {
         avatar: null,
       });
       setUserUploads(data.user.uploadCount);
+      setUserDownloads(data.user.downloadCount);
       setIsAuthenticated(true);
       setShowAuthModal(false);
       setLoginForm({ email: "", password: "" });
@@ -206,7 +291,6 @@ export default function HomePage() {
         return;
       }
 
-      // Save token to localStorage
       localStorage.setItem('token', data.token);
       
       setUser({
@@ -215,6 +299,7 @@ export default function HomePage() {
         avatar: null,
       });
       setUserUploads(data.user.uploadCount);
+      setUserDownloads(data.user.downloadCount);
       setIsAuthenticated(true);
       setShowAuthModal(false);
       setSignupForm({ name: "", email: "", password: "", confirmPassword: "" });
@@ -231,6 +316,15 @@ export default function HomePage() {
     setIsAuthenticated(false);
     setUser({ name: "", email: "", avatar: null });
     setUserUploads(0);
+    setUserDownloads(0);
+  };
+
+  const handleSubjectFilter = (subject) => {
+    if (selectedSubject === subject) {
+      setSelectedSubject(null);
+    } else {
+      setSelectedSubject(subject);
+    }
   };
 
   return (
@@ -263,11 +357,10 @@ export default function HomePage() {
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Left Sidebar - Profile (Only visible when authenticated) */}
+        {/* Left Sidebar - Profile */}
         {isAuthenticated && (
           <aside className="lg:col-span-1">
             <div className="bg-white rounded-xl shadow-sm p-6 sticky top-24">
-              {/* Profile Avatar */}
               <div className="flex flex-col items-center mb-6">
                 <div className="w-24 h-24 rounded-full bg-indigo-600 flex items-center justify-center text-white text-4xl mb-3">
                   👤
@@ -315,7 +408,7 @@ export default function HomePage() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Total Downloads:</span>
-                    <span className="font-semibold">0</span>
+                    <span className="font-semibold">{userDownloads}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Documents Shared:</span>
@@ -352,7 +445,12 @@ export default function HomePage() {
               {SUBJECTS.map((subject) => (
                 <button
                   key={subject}
-                  className="px-4 py-2 rounded-full bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 text-sm font-medium text-gray-700 transition-colors"
+                  onClick={() => handleSubjectFilter(subject)}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                    selectedSubject === subject
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 text-gray-700"
+                  }`}
                 >
                   {subject}
                 </button>
@@ -360,53 +458,79 @@ export default function HomePage() {
             </div>
           </section>
 
-          {/* Popular Materials */}
+          {/* Resources List */}
           <section className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">
-              Popular Study Materials
-            </h2>
-            <div className="space-y-4">
-              {POPULAR_MATERIALS.map((material) => (
-                <div
-                  key={material.id}
-                  className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-indigo-300 transition-colors"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center text-2xl">
-                      📄
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-gray-900">
-                        {material.title}
-                      </h3>
-                      <p className="text-sm text-gray-500">{material.subject}</p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {material.uploads} uploads
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleDownload(material.id)}
-                    disabled={isAuthenticated && !canDownload}
-                    className={`px-6 py-2.5 rounded-lg font-medium flex items-center gap-2 transition-all ${
-                      !isAuthenticated || canDownload
-                        ? "bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
-                        : "bg-gray-300 text-gray-500 cursor-not-allowed opacity-50"
-                    }`}
-                    title={
-                      !isAuthenticated 
-                        ? "Login to download" 
-                        : !canDownload 
-                        ? `Upload ${uploadsNeeded} more documents to unlock` 
-                        : ""
-                    }
-                  >
-                    <span>⬇️</span>
-                    Download
-                  </button>
-                </div>
-              ))}
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-bold text-gray-900">
+                {selectedSubject ? `${selectedSubject} Resources` : 'All Study Materials'}
+              </h2>
+              <span className="text-sm text-gray-500">
+                {resources.length} resources found
+              </span>
             </div>
+
+            {loading ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500">Loading resources...</p>
+              </div>
+            ) : resources.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500">No resources found. Be the first to upload!</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {resources
+                  .filter(resource => 
+                    query === "" || 
+                    resource.title.toLowerCase().includes(query.toLowerCase()) ||
+                    resource.description.toLowerCase().includes(query.toLowerCase())
+                  )
+                  .map((resource) => (
+                    <div
+                      key={resource._id}
+                      className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-indigo-300 transition-colors"
+                    >
+                      <div className="flex items-center gap-4 flex-1">
+                        <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center text-2xl">
+                          📄
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-gray-900">
+                            {resource.title}
+                          </h3>
+                          <p className="text-sm text-gray-500">{resource.subject}</p>
+                          <p className="text-xs text-gray-400 mt-1">
+                            {resource.description.substring(0, 80)}
+                            {resource.description.length > 80 ? '...' : ''}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-1">
+                            Uploaded by {resource.uploadedBy?.name || 'Unknown'}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDownload(resource._id)}
+                        disabled={isAuthenticated && !canDownload}
+                        className={`px-6 py-2.5 rounded-lg font-medium flex items-center gap-2 transition-all ${
+                          !isAuthenticated || canDownload
+                            ? "bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
+                            : "bg-gray-300 text-gray-500 cursor-not-allowed opacity-50"
+                        }`}
+                        title={
+                          !isAuthenticated 
+                            ? "Login to download" 
+                            : !canDownload 
+                            ? `Upload ${uploadsNeeded} more documents to unlock` 
+                            : ""
+                        }
+                      >
+                        <span>⬇️</span>
+                        Download
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            )}
 
             {isAuthenticated && !canDownload && (
               <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
@@ -426,19 +550,21 @@ export default function HomePage() {
           </section>
         </main>
       </div>
+
+      {/* Upload Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 relative">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setShowUploadModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl"
             >
               ✕
             </button>
-            <h2 className="text-2xl font-bold mb-4">Upload Resource</h2>
+            <h2 className="text-2xl font-bold mb-4 text-gray-900">Upload Resource</h2>
             <form onSubmit={handleUploadSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Title</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
                 <input
                   type="text"
                   required
@@ -446,19 +572,19 @@ export default function HomePage() {
                   onChange={(e) =>
                     setUploadForm({ ...uploadForm, title: e.target.value })
                   }
-                  className="w-full px-4 py-2 border rounded-lg"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="Resource Title"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Subject</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
                 <select
                   required
                   value={uploadForm.subject}
                   onChange={(e) =>
                     setUploadForm({ ...uploadForm, subject: e.target.value })
                   }
-                  className="w-full px-4 py-2 border rounded-lg"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="">Select Subject</option>
                   {SUBJECTS.map((subject) => (
@@ -469,32 +595,37 @@ export default function HomePage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Description</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
                 <textarea
                   required
                   value={uploadForm.description}
                   onChange={(e) =>
                     setUploadForm({ ...uploadForm, description: e.target.value })
                   }
-                  className="w-full px-4 py-2 border rounded-lg"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="Brief description"
                   rows={3}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">File</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">File</label>
                 <input
                   type="file"
                   required
                   onChange={handleFileChange}
-                  className="w-full"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   accept=".pdf,.doc,.docx,.ppt,.pptx,.txt"
                 />
+                {uploadForm.file && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Selected: {uploadForm.file.name}
+                  </p>
+                )}
               </div>
               <button
                 type="submit"
                 disabled={uploading}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors disabled:bg-gray-400"
               >
                 {uploading ? "Uploading..." : "Upload"}
               </button>
@@ -502,13 +633,14 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
       {/* Auth Modal */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 relative">
             <button
               onClick={() => setShowAuthModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl"
             >
               ✕
             </button>
