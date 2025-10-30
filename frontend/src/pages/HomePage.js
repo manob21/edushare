@@ -52,6 +52,14 @@ export default function HomePage() {
     email: "",
     avatar: null,
   });
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadForm, setUploadForm] = useState({
+    title: "",
+    subject: "",
+    description: "",
+    file: null,
+  });
+  const [uploading, setUploading] = useState(false);
 
   // Form states
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
@@ -79,14 +87,56 @@ export default function HomePage() {
     
     console.log(`Downloading material ${materialId}`);
   };
-
+  // Show upload modal only if authenticated
   const handleUploadClick = () => {
     if (!isAuthenticated) {
       setShowAuthModal(true);
       setAuthMode("login");
       return;
     }
-    console.log("Upload document clicked");
+    setShowUploadModal(true);
+  };
+
+  const handleFileChange = (e) => {
+    setUploadForm({ ...uploadForm, file: e.target.files[0] });
+  };
+
+  // Handle upload form submit
+  const handleUploadSubmit = async (e) => {
+    e.preventDefault();
+    setUploading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const formData = new FormData();
+      formData.append("title", uploadForm.title);
+      formData.append("subject", uploadForm.subject);
+      formData.append("description", uploadForm.description);
+      formData.append("file", uploadForm.file);
+
+      const response = await fetch(`${API_URL}/resource/upload`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      const data = await response.json();
+      setUploading(false);
+
+      if (!response.ok) {
+        alert(data.message || "Upload failed");
+        return;
+      }
+
+      alert("Resource uploaded successfully!");
+      setShowUploadModal(false);
+      setUploadForm({ title: "", subject: "", description: "", file: null });
+      // Optionally, refresh user uploads count here
+    } catch (error) {
+      setUploading(false);
+      alert("Error uploading resource");
+    }
   };
 
   const handleLogin = async (e) => {
@@ -376,7 +426,82 @@ export default function HomePage() {
           </section>
         </main>
       </div>
-
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 relative">
+            <button
+              onClick={() => setShowUploadModal(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+            >
+              ✕
+            </button>
+            <h2 className="text-2xl font-bold mb-4">Upload Resource</h2>
+            <form onSubmit={handleUploadSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Title</label>
+                <input
+                  type="text"
+                  required
+                  value={uploadForm.title}
+                  onChange={(e) =>
+                    setUploadForm({ ...uploadForm, title: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border rounded-lg"
+                  placeholder="Resource Title"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Subject</label>
+                <select
+                  required
+                  value={uploadForm.subject}
+                  onChange={(e) =>
+                    setUploadForm({ ...uploadForm, subject: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border rounded-lg"
+                >
+                  <option value="">Select Subject</option>
+                  {SUBJECTS.map((subject) => (
+                    <option key={subject} value={subject}>
+                      {subject}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Description</label>
+                <textarea
+                  required
+                  value={uploadForm.description}
+                  onChange={(e) =>
+                    setUploadForm({ ...uploadForm, description: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border rounded-lg"
+                  placeholder="Brief description"
+                  rows={3}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">File</label>
+                <input
+                  type="file"
+                  required
+                  onChange={handleFileChange}
+                  className="w-full"
+                  accept=".pdf,.doc,.docx,.ppt,.pptx,.txt"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={uploading}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors"
+              >
+                {uploading ? "Uploading..." : "Upload"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
       {/* Auth Modal */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">

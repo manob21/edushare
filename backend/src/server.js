@@ -3,6 +3,8 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const connectDatabase = require('./config/database');
 const authRoutes = require('./routes/authRoutes');
+const resourceRoutes = require('./routes/resourceRoutes');
+const path = require('path');
 
 // Load environment variables
 dotenv.config();
@@ -37,6 +39,8 @@ app.get('/api/health', (req, res) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/resource', resourceRoutes);
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Error handling for uncaught exceptions
 process.on('uncaughtException', (err) => {
