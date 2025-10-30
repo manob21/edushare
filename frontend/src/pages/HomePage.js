@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 
-const SUBJECTS = [
+const DEFAULT_SUBJECTS = [
   "Computer Science",
   "Mathematics",
   "Physics",
@@ -31,11 +31,13 @@ export default function HomePage() {
     subject: "",
     description: "",
     file: null,
+    newSubject: "",
   });
   const [uploading, setUploading] = useState(false);
   const [resources, setResources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedSubject, setSelectedSubject] = useState(null);
+  const [subjects, setSubjects] = useState(DEFAULT_SUBJECTS);
 
   // Form states
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
@@ -46,10 +48,16 @@ export default function HomePage() {
     confirmPassword: "",
   });
 
+  // Define canDownload based on userUploads
   const canDownload = userUploads >= 3;
   const uploadsNeeded = 3 - userUploads;
 
-  // Fetch resources on component mount
+  // Fetch subjects on component mount
+  useEffect(() => {
+    fetchSubjects();
+  }, []);
+
+  // Fetch resources when selected subject changes
   useEffect(() => {
     fetchResources();
   }, [selectedSubject]);
@@ -61,6 +69,21 @@ export default function HomePage() {
       fetchCurrentUser();
     }
   }, []);
+
+  const fetchSubjects = async () => {
+    try {
+      const response = await fetch(`${API_URL}/resource/subjects`);
+      const data = await response.json();
+      
+      if (response.ok && data.subjects.length > 0) {
+        // Merge default subjects with database subjects, remove duplicates
+        const allSubjects = [...new Set([...DEFAULT_SUBJECTS, ...data.subjects])];
+        setSubjects(allSubjects.sort());
+      }
+    } catch (error) {
+      console.error('Error fetching subjects:', error);
+    }
+  };
 
   const fetchCurrentUser = async () => {
     try {
@@ -91,7 +114,7 @@ export default function HomePage() {
     try {
       setLoading(true);
       const endpoint = selectedSubject 
-        ? `${API_URL}/resource/subject/${selectedSubject}`
+        ? `${API_URL}/resource/subject/${encodeURIComponent(selectedSubject)}`
         : `${API_URL}/resource/all`;
       
       const response = await fetch(endpoint);
@@ -122,7 +145,6 @@ export default function HomePage() {
     try {
       const token = localStorage.getItem('token');
       
-      // Create a temporary link to trigger download
       const response = await fetch(`${API_URL}/resource/download/${resourceId}`, {
         method: 'GET',
         headers: {
@@ -131,7 +153,6 @@ export default function HomePage() {
       });
 
       if (response.ok) {
-        // Get the filename from Content-Disposition header
         const contentDisposition = response.headers.get('Content-Disposition');
         let filename = `resource-${resourceId}`;
         if (contentDisposition) {
@@ -141,7 +162,6 @@ export default function HomePage() {
           }
         }
 
-        // Convert response to blob and trigger download
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -152,7 +172,6 @@ export default function HomePage() {
         a.remove();
         window.URL.revokeObjectURL(url);
 
-        // Refresh user data to update download count
         await fetchCurrentUser();
         
         alert('Download started successfully!');
@@ -179,15 +198,31 @@ export default function HomePage() {
     setUploadForm({ ...uploadForm, file: e.target.files[0] });
   };
 
+  const handleSubjectChange = (e) => {
+    const selected = e.target.value;
+    setUploadForm({ ...uploadForm, subject: selected, newSubject: "" });
+  };
+
+  const handleNewSubjectChange = (e) => {
+    setUploadForm({ ...uploadForm, newSubject: e.target.value });
+  };
+
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
+    
+    // Validate that if "Other" is selected, a new subject is provided
+    if (uploadForm.subject === "Other" && !uploadForm.newSubject.trim()) {
+      alert("Please enter a subject name");
+      return;
+    }
+    
     setUploading(true);
 
     try {
       const token = localStorage.getItem("token");
       const formData = new FormData();
       formData.append("title", uploadForm.title);
-      formData.append("subject", uploadForm.subject);
+      formData.append("subject", uploadForm.subject === "Other" ? uploadForm.newSubject.trim() : uploadForm.subject);
       formData.append("description", uploadForm.description);
       formData.append("file", uploadForm.file);
 
@@ -209,14 +244,15 @@ export default function HomePage() {
 
       alert("Resource uploaded successfully!");
       setShowUploadModal(false);
-      setUploadForm({ title: "", subject: "", description: "", file: null });
+      setUploadForm({ title: "", subject: "", description: "", file: null, newSubject: "" });
       
       // Update user upload count
       setUserUploads(data.user.uploadCount);
       setUserDownloads(data.user.downloadCount);
       
-      // Refresh resources list
-      fetchResources();
+      // Refresh subjects list and resources
+      await fetchSubjects();
+      await fetchResources();
     } catch (error) {
       setUploading(false);
       console.error('Upload error:', error);
@@ -442,7 +478,7 @@ export default function HomePage() {
 
             {/* Subject Tags */}
             <div className="flex flex-wrap gap-2 mt-4">
-              {SUBJECTS.map((subject) => (
+              {subjects.map((subject) => (
                 <button
                   key={subject}
                   onClick={() => handleSubjectFilter(subject)}
@@ -581,18 +617,27 @@ export default function HomePage() {
                 <select
                   required
                   value={uploadForm.subject}
-                  onChange={(e) =>
-                    setUploadForm({ ...uploadForm, subject: e.target.value })
-                  }
+                  onChange={handleSubjectChange}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="">Select Subject</option>
-                  {SUBJECTS.map((subject) => (
+                  {subjects.map((subject) => (
                     <option key={subject} value={subject}>
                       {subject}
                     </option>
                   ))}
+                  <option value="Other">Other (Add New Subject)</option>
                 </select>
+                {uploadForm.subject === "Other" && (
+                  <input
+                    type="text"
+                    required
+                    value={uploadForm.newSubject}
+                    onChange={handleNewSubjectChange}
+                    placeholder="Enter new subject"
+                    className="mt-2 w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>

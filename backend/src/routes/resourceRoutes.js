@@ -40,7 +40,7 @@ router.post('/upload', protect, upload.single('file'), async (req, res) => {
     const { title, subject, description } = req.body;
     const file = req.file;
 
-    if (!title || !subject || !description || !file) {
+    if (!title || !description || !file) {
       return res.status(400).json({ 
         success: false, 
         message: 'All fields are required.' 
@@ -50,7 +50,7 @@ router.post('/upload', protect, upload.single('file'), async (req, res) => {
     // Save resource to DB
     const resource = await Resource.create({
       title,
-      subject,
+      subject, // This will be the new subject if "Other" is selected
       description,
       fileName: file.originalname,
       fileUrl: `/uploads/${file.filename}`,
@@ -123,6 +123,23 @@ router.get('/subject/:subject', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching resources',
+      error: error.message
+    });
+  }
+});
+
+// Get all unique subjects
+router.get('/subjects', async (req, res) => {
+  try {
+    const subjects = await Resource.distinct('subject');
+    res.status(200).json({
+      success: true,
+      subjects: subjects.sort()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching subjects',
       error: error.message
     });
   }
