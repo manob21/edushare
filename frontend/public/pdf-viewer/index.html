@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PDF Viewer</title>
+  <style>
+    html,body,#pages { height:100%; margin:0; background:#0b1220; color:#e5e7eb; }
+    #pages {
+      overflow:auto; padding:24px; box-sizing:border-box;
+      cursor: grab;
+      /* allow native wheel/trackpad while we control pointer-drag */
+      touch-action: pan-x pan-y;
+    }
+    #pages.grabbing { cursor: grabbing; }
+    canvas { display:block; margin:0 auto 16px; background:#0f172a; }
+    #msg { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; color:#cbd5e1; }
+    .hidden { display:none; }
+  </style>
+</head>
+<body>
+  <div id="pages" tabindex="0" aria-label="PDF content"></div>
+  <div id="msg" class="">Loading PDF...</div>
+
+  <script type="module">
+    import * as pdfjsLib from '/pdfjs/build/pdf.mjs';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/build/pdf.worker.mjs';
+
+    const qs = new URLSearchParams(location.search);
+    const fileUrl = qs.get('file');
+
+    const pages = document.getElementById('pages');
+    let pdfDoc = null;
+    let zoom = 1;
+
+    function parseZoomFromHash() {
+      const m = /zoom=(\d+)/.exec(location.hash);
+      return m ? Math.max(0.25, Math.min(4, parseInt(m[1], 10) / 100)) : 1.25; // default 125%
+    }
+
+    async function renderAll() {
+      document.getElementById('msg').classList.remove('hidden');
+      zoom = parseZoomFromHash();
+      pdfDoc = await pdfjsLib.getDocument({
+        url: fileUrl,
+        cMapUrl: '/pdfjs/cmaps/',
+        cMapPacked: true,
+        standardFontDataUrl: '/pdfjs/standard_fonts/',
+        disableStream: false,
+        disableRange: false,
+      }).promise;
+
+      pages.innerHTML = '';
+      for (let p = 1; p <= pdfDoc.numPages; p++) {
+        const page = await pdfDoc.getPage(p);
+        const viewport = page.getViewport({ scale: zoom });
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        pages.appendChild(canvas);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      }
+      document.getElementById('msg').classList.add('hidden');
+      setTimeout(() => pages.focus({ preventScroll: true }), 0);
+    }
+
+    window.addEventListener('hashchange', async () => {
+      const newZoom = parseZoomFromHash();
+      if (Math.abs(newZoom - zoom) < 0.0001) return;
+      zoom = newZoom;
+      if (!pdfDoc) return;
+      document.getElementById('msg').classList.remove('hidden');
+      const num = pdfDoc.numPages;
+      pages.innerHTML = '';
+      for (let p = 1; p <= num; p++) {
+        const page = await pdfDoc.getPage(p);
+        const viewport = page.getViewport({ scale: zoom });
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        pages.appendChild(canvas);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      }
+      document.getElementById('msg').classList.add('hidden');
+    });
+
+    // Keyboard scrolling (already working)
+    function scrollStep(pxY, pxX = 0) {
+      pages.scrollBy({ top: pxY, left: pxX, behavior: 'smooth' });
+    }
+    window.addEventListener('keydown', (e) => {
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
+
+      const pageStep = Math.max(100, Math.floor(pages.clientHeight * 0.9));
+      switch (e.key) {
+        case 'ArrowDown': e.preventDefault(); scrollStep(100); break;
+        case 'ArrowUp':   e.preventDefault(); scrollStep(-100); break;
+        case 'PageDown':  e.preventDefault(); scrollStep(pageStep); break;
+        case 'PageUp':    e.preventDefault(); scrollStep(-pageStep); break;
+        case ' ':         e.preventDefault(); scrollStep(e.shiftKey ? -pageStep : pageStep); break;
+        case 'Home':      e.preventDefault(); pages.scrollTo({ top: 0, behavior: 'smooth' }); break;
+        case 'End':       e.preventDefault(); pages.scrollTo({ top: pages.scrollHeight, behavior: 'smooth' }); break;
+      }
+    });
+
+    // Fix mouse-wheel/trackpad scrolling to always scroll the PDF container
+    pages.addEventListener('wheel', (e) => {
+      if (e.ctrlKey) return; // let browser handle Ctrl+wheel (zoom)
+      e.preventDefault(); // ensure parent page doesn't eat the scroll
+      const factor = (e.deltaMode === 1) ? 16 : 1; // line -> px
+      const dy = e.deltaY * factor;
+      const dx = e.deltaX * factor;
+      pages.scrollBy({ top: dy, left: dx, behavior: 'auto' });
+    }, { passive: false });
+
+    // Robust grab-to-pan (mouse, pen, touch)
+    let panning = false;
+    let pointerId = null;
+    let startX = 0, startY = 0, startScrollLeft = 0, startScrollTop = 0;
+
+    const beginPan = (e) => {
+      // Only primary button for mouse; allow pen/touch
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      panning = true;
+      pointerId = e.pointerId;
+      startX = e.clientX;
+      startY = e.clientY;
+      startScrollLeft = pages.scrollLeft;
+      startScrollTop = pages.scrollTop;
+      pages.classList.add('grabbing');
+      pages.style.userSelect = 'none';
+      pages.style.touchAction = 'none';
+      e.preventDefault();
+
+      // track on document to avoid losing events
+      document.addEventListener('pointermove', doPan, { passive: false });
+      document.addEventListener('pointerup', endPan, { passive: false });
+      document.addEventListener('pointercancel', endPan, { passive: false });
+    };
+
+    const doPan = (e) => {
+      if (!panning || e.pointerId !== pointerId) return;
+      e.preventDefault();
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      pages.scrollLeft = startScrollLeft - dx;
+      pages.scrollTop = startScrollTop - dy;
+    };
+
+    const endPan = (e) => {
+      if (!panning || e.pointerId !== pointerId) return;
+      panning = false;
+      pointerId = null;
+      pages.classList.remove('grabbing');
+      pages.style.userSelect = '';
+      pages.style.touchAction = 'pan-x pan-y';
+      document.removeEventListener('pointermove', doPan);
+      document.removeEventListener('pointerup', endPan);
+      document.removeEventListener('pointercancel', endPan);
+    };
+
+    pages.addEventListener('pointerdown', beginPan);
+
+    // Initial render
+    if (!fileUrl) {
+      document.getElementById('msg').textContent = 'No file parameter.';
+    } else {
+      renderAll();
+    }
+  </script>
+</body>
+</html>

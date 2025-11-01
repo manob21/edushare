@@ -1,66 +1,76 @@
 const express = require('express');
-const dotenv = require('dotenv');
 const cors = require('cors');
-const connectDatabase = require('./config/database');
+const dotenv = require('dotenv');
+const connectDB = require('./config/database');
 const authRoutes = require('./routes/authRoutes');
 const resourceRoutes = require('./routes/resourceRoutes');
 const path = require('path');
 
-// Load environment variables
 dotenv.config();
 
-// Initialize express app
+// Connect to database
+connectDB();
+
 const app = express();
 
 // Middleware
+app.use(cors({
+  origin: 'http://localhost:3000',
+  credentials: true,
+}));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(cors());
 
-// Connect to database
-connectDatabase();
+// Serve static uploads with inline PDF headers and CORS
+app.use(
+  '/uploads',
+  express.static(path.join(__dirname, '..', 'uploads'), {
+    setHeaders: (res, filePath) => {
+      const lower = filePath.toLowerCase();
+      // Allow embedding from any origin during dev (so iframes work reliably)
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Accept-Ranges', 'bytes'); // range support for PDF viewer
 
-// Test route
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'EduShare API is running!',
-    status: 'success'
-  });
-});
+      if (lower.endsWith('.pdf')) {
+        res.setHeader('Content-Type', 'application/pdf');
+        // Critical: render in browser, do not download
+        res.setHeader('Content-Disposition', 'inline');
+      }
+    },
+  })
+);
 
-// Health check route
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK',
-    database: 'Connected',
-    timestamp: new Date()
-  });
-});
+// Keep static /uploads with inline-friendly headers (for direct links too)
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads'), {
+  setHeaders: (res, filePath) => {
+    const lower = filePath.toLowerCase();
+    res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (lower.endsWith('.pdf')) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline');
+    }
+  },
+}));
 
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/resource', resourceRoutes);
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// Error handling for uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.log('UNCAUGHT EXCEPTION! 💥 Shutting down...');
-  console.log(err.name, err.message);
-  process.exit(1);
+// Basic route
+app.get('/', (req, res) => {
+  res.json({ message: 'Welcome to EduShare API' });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ message: 'Internal server error' });
 });
 
 const PORT = process.env.PORT || 5000;
 
-const server = app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-});
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  console.log('UNHANDLED REJECTION! 💥 Shutting down...');
-  console.log(err.name, err.message);
-  server.close(() => {
-    process.exit(1);
-  });
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });

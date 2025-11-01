@@ -1,6 +1,7 @@
 import React from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import HomePage from "./pages/HomePage";
+import DocumentViewer from "./pages/DocumentViewer";
 
 function CategoryPagePlaceholder() {
   return (
@@ -17,11 +18,11 @@ function CategoryPagePlaceholder() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <Router>
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/category/:categoryId" element={<CategoryPagePlaceholder />} />
+        <Route path="/document/:id" element={<DocumentViewer />} />
       </Routes>
-    </BrowserRouter>
+    </Router>
   );
 }

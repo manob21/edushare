@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import DocumentViewer from './DocumentViewer'; // Add this import
+import { Link, useNavigate } from 'react-router-dom'; // Import Link for navigation
 
 const DEFAULT_SUBJECTS = [
   "Computer Science",
@@ -42,6 +44,8 @@ export default function HomePage() {
   const [documentListType, setDocumentListType] = useState(''); // 'uploaded' or 'downloaded'
   const [userDocuments, setUserDocuments] = useState([]);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState(null); // Add this state
+  const navigate = useNavigate();
 
   // Form states
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
@@ -61,10 +65,28 @@ export default function HomePage() {
     fetchSubjects();
   }, []);
 
-  // Fetch resources when selected subject changes
+  // Wrap fetchResources to satisfy eslint exhaustive-deps
+  const fetchResources = useCallback(async () => {
+    try {
+      setLoading(true);
+      const endpoint = selectedSubject
+        ? `${API_URL}/resource/subject/${encodeURIComponent(selectedSubject)}`
+        : `${API_URL}/resource/all`;
+
+      const response = await fetch(endpoint);
+      const data = await response.json();
+      if (response.ok) setResources(data.resources);
+    } catch (error) {
+      console.error('Error fetching resources:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedSubject]);
+
+  // Fetch when subject changes
   useEffect(() => {
     fetchResources();
-  }, [selectedSubject]);
+  }, [fetchResources]);
 
   // Check if user is logged in on mount
   useEffect(() => {
@@ -111,26 +133,6 @@ export default function HomePage() {
       }
     } catch (error) {
       console.error('Error fetching user:', error);
-    }
-  };
-
-  const fetchResources = async () => {
-    try {
-      setLoading(true);
-      const endpoint = selectedSubject 
-        ? `${API_URL}/resource/subject/${encodeURIComponent(selectedSubject)}`
-        : `${API_URL}/resource/all`;
-      
-      const response = await fetch(endpoint);
-      const data = await response.json();
-
-      if (response.ok) {
-        setResources(data.resources);
-      }
-    } catch (error) {
-      console.error('Error fetching resources:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -412,6 +414,10 @@ export default function HomePage() {
     setShowAuthModal(true);
   };
 
+  const handleOpenDocument = (resource) => {
+    navigate(`/document/${resource._id}`);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -599,16 +605,15 @@ export default function HomePage() {
                   .map((resource) => (
                     <div
                       key={resource._id}
-                      className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-indigo-300 transition-colors"
+                      className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-indigo-300 transition-colors cursor-pointer"
+                      onClick={() => handleOpenDocument(resource)}
                     >
                       <div className="flex items-center gap-4 flex-1">
                         <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center text-2xl">
                           📄
                         </div>
                         <div className="flex-1">
-                          <h3 className="font-semibold text-gray-900">
-                            {resource.title}
-                          </h3>
+                          <h3 className="font-semibold text-gray-900">{resource.title}</h3>
                           <p className="text-sm text-gray-500">{resource.subject}</p>
                           <p className="text-xs text-gray-400 mt-1">
                             {resource.description.substring(0, 80)}
@@ -620,7 +625,7 @@ export default function HomePage() {
                         </div>
                       </div>
                       <button
-                        onClick={() => handleDownload(resource._id)}
+                        onClick={(e) => { e.stopPropagation(); handleDownload(resource._id); }}
                         disabled={isAuthenticated && !canDownload}
                         className={`px-6 py-2.5 rounded-lg font-medium flex items-center gap-2 transition-all ${
                           !isAuthenticated || canDownload
@@ -628,10 +633,10 @@ export default function HomePage() {
                             : "bg-gray-300 text-gray-500 cursor-not-allowed opacity-50"
                         }`}
                         title={
-                          !isAuthenticated 
-                            ? "Login to download" 
-                            : !canDownload 
-                            ? `Upload ${uploadsNeeded} more documents to unlock` 
+                          !isAuthenticated
+                            ? "Login to download"
+                            : !canDownload
+                            ? `Upload ${uploadsNeeded} more documents to unlock`
                             : ""
                         }
                       >
@@ -987,6 +992,17 @@ export default function HomePage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Document Viewer Modal */}
+      {selectedDocument && (
+        <DocumentViewer
+          document={selectedDocument}
+          onClose={() => setSelectedDocument(null)}
+          onDownload={handleDownload}
+          isAuthenticated={isAuthenticated}
+          canDownload={canDownload}
+        />
       )}
     </div>
   );
