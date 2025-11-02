@@ -5,11 +5,25 @@ const connectDB = require('./config/database');
 const authRoutes = require('./routes/authRoutes');
 const resourceRoutes = require('./routes/resourceRoutes');
 const path = require('path');
+const mongoose = require('mongoose');
+const FileService = require('./services/FileService');
 
 dotenv.config();
 
 // Connect to database
 connectDB();
+
+// After mongoose connects, initialize FileService (GridFS bucket)
+mongoose.connection.once('open', async () => {
+  try {
+    const db = mongoose.connection.db; // native driver db
+    await FileService.init(db);
+    console.log('FileService initialized');
+  } catch (e) {
+    console.error('FileService init failed:', e);
+    process.exit(1);
+  }
+});
 
 const app = express();
 
@@ -66,7 +80,8 @@ app.get('/', (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ message: 'Internal server error' });
+  if (res.headersSent) return next(err);
+  res.status(500).json({ message: err.message || 'Server error' });
 });
 
 const PORT = process.env.PORT || 5000;

@@ -13,7 +13,7 @@ const DEFAULT_SUBJECTS = [
   "Economics",
 ];
 
-const API_URL = 'http://localhost:5000/api';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
@@ -45,6 +45,8 @@ export default function HomePage() {
   const [userDocuments, setUserDocuments] = useState([]);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState(null); // Add this state
+  const [popularMode, setPopularMode] = useState(false);
+  const [viewMode, setViewMode] = useState('all'); // 'all' | 'popular'
   const navigate = useNavigate();
 
   // Form states
@@ -174,6 +176,57 @@ export default function HomePage() {
     setShowDocumentModal(false);
     setUserDocuments([]);
     setDocumentListType('');
+  };
+
+  // Fetch top 10 most downloaded
+  const fetchPopular = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/resource/popular`);
+      const data = await res.json();
+      if (data.success) {
+        setResources(data.resources);
+        setViewMode('popular');
+        setSelectedSubject && setSelectedSubject('');
+      }
+    } catch (err) {
+      console.error('Error fetching popular:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Back to all
+  const fetchAll = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/resource/all`);
+      const data = await res.json();
+      if (data.success) {
+        setResources(data.resources);
+        setViewMode('all');
+      }
+    } catch (err) {
+      console.error('Error fetching all:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Subject click -> that subject’s materials
+  const handleSubjectClick = async (subject) => {
+    setSelectedSubject(subject);
+    setViewMode('all');
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/resource/subject/${encodeURIComponent(subject)}`);
+      const data = await res.json();
+      if (data.success) setResources(data.resources);
+    } catch (e) {
+      console.error('Error fetching subject resources:', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDownload = async (resourceId) => {
@@ -1004,6 +1057,76 @@ export default function HomePage() {
           canDownload={canDownload}
         />
       )}
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="text-center mb-12">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2">
+            {popularMode ? 'Most Popular Documents' : 'All Documents'}
+          </h1>
+          <p className="text-gray-600 mb-6">
+            {popularMode
+              ? 'Explore the top 10 most downloaded documents.'
+              : 'Find and share study materials with your peers.'}
+          </p>
+
+          {/* Most Popular button (added) */}
+          <div className="mb-6">
+            <button
+              onClick={fetchPopular}
+              className={`inline-flex items-center gap-2 px-6 py-3 rounded-full font-semibold transition-all ${
+                viewMode === 'popular'
+                  ? 'bg-indigo-600 text-white shadow-lg'
+                  : 'bg-white text-indigo-600 border-2 border-indigo-600 hover:bg-indigo-50'
+              }`}
+              aria-label="Show most popular documents"
+            >
+              <span className="material-icons-outlined text-xl">trending_up</span>
+              Most Popular
+            </button>
+            {viewMode === 'popular' && (
+              <button
+                onClick={fetchAll}
+                className="ml-3 inline-flex items-center gap-2 px-6 py-3 rounded-full font-semibold bg-white text-gray-700 border-2 border-gray-300 hover:bg-gray-50 transition-all"
+              >
+                <span className="material-icons-outlined text-xl">view_list</span>
+                Show All
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Documents section title can reflect mode if you want */}
+        {/* Example: */}
+        {/* <h2>{popularMode ? 'Most Popular Documents' : 'All Documents'}</h2> */}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {resources.map((resource) => (
+            <div
+              key={resource._id}
+              className="bg-white rounded-lg shadow-md overflow-hidden transition-transform transform hover:scale-105 cursor-pointer"
+              onClick={() => handleOpenDocument(resource)}
+            >
+              <div className="p-4">
+                <h3 className="text-lg font-semibold text-gray-900">{resource.title}</h3>
+                <p className="text-sm text-gray-500">{resource.subject}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {resource.description.substring(0, 60)}
+                  {resource.description.length > 60 ? '...' : ''}
+                </p>
+              </div>
+              <div className="flex items-center justify-between p-4 bg-gray-50 border-t">
+                <span className="text-xs text-gray-500">
+                  Uploaded by {resource.uploadedBy?.name || 'Unknown'}
+                </span>
+                <span className="flex items-center gap-1 text-indigo-600">
+                  <span className="material-icons-outlined text-base">download</span>
+                  {popularMode && resource.downloads}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
     </div>
   );
 }

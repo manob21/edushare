@@ -5,31 +5,52 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>PDF Viewer</title>
   <style>
-    html,body,#pages { height:100%; margin:0; background:#0b1220; color:#e5e7eb; }
+    html, body, #pages { height: 100%; margin: 0; background:#0b1220; color:#e5e7eb; }
     #pages {
-      overflow:auto; padding:24px; box-sizing:border-box;
-      cursor: grab;
-      /* allow native wheel/trackpad while we control pointer-drag */
-      touch-action: pan-x pan-y;
+      overflow: auto; padding: 24px; box-sizing: border-box;
+      cursor: grab; touch-action: pan-x pan-y;
     }
     #pages.grabbing { cursor: grabbing; }
-    canvas { display:block; margin:0 auto 16px; background:#0f172a; }
+    canvas { display: block; margin: 0 auto 16px; background:#0f172a; }
     #msg { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; color:#cbd5e1; }
     .hidden { display:none; }
+
+    /* Gating notice (appears when preview-only) */
+    #gate {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+      background: rgba(17, 24, 39, 0.9); color: #e5e7eb;
+      border: 1px solid rgba(148,163,184,0.4);
+      border-radius: 16px; padding: 14px 18px; z-index: 50;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+      display: flex; align-items: center; gap: 12px; max-width: 92vw;
+    }
+    #gate strong { color:#93c5fd; }
+    #gate .btn {
+      background:white; color:#111827; border:1px solid #d1d5db;
+      padding: 8px 12px; border-radius: 9999px; font-weight: 600; cursor: pointer;
+    }
+    #gate .btn.primary {
+      background:#3b82f6; border-color:#2563eb; color:white;
+    }
   </style>
 </head>
 <body>
   <div id="pages" tabindex="0" aria-label="PDF content"></div>
-  <div id="msg" class="">Loading PDF...</div>
+  <div id="msg">Loading PDF...</div>
+  <div id="gate" class="hidden"></div>
 
   <script type="module">
     import * as pdfjsLib from '/pdfjs/build/pdf.mjs';
     pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/build/pdf.worker.mjs';
 
+    const API_URL = 'http://localhost:5000/api';
     const qs = new URLSearchParams(location.search);
     const fileUrl = qs.get('file');
 
     const pages = document.getElementById('pages');
+    const gate = document.getElementById('gate');
+    const msg = document.getElementById('msg');
+
     let pdfDoc = null;
     let zoom = 1;
 
@@ -38,8 +59,47 @@
       return m ? Math.max(0.25, Math.min(4, parseInt(m[1], 10) / 100)) : 1.25; // default 125%
     }
 
+    async function getAuthState() {
+      const token = localStorage.getItem('token');
+      if (!token) return { isAuthenticated: false, uploadCount: 0 };
+      try {
+        const r = await fetch(`${API_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!r.ok) return { isAuthenticated: false, uploadCount: 0 };
+        const d = await r.json();
+        return { isAuthenticated: true, uploadCount: d?.user?.uploadCount ?? 0 };
+      } catch {
+        return { isAuthenticated: false, uploadCount: 0 };
+      }
+    }
+
+    function showGate(message, showActions) {
+      gate.innerHTML = `
+        <span>Preview: showing first <strong>5 pages</strong>. ${message}</span>
+        ${showActions ? `
+          <button class="btn" id="gate-login">Sign in</button>
+          <button class="btn primary" id="gate-upload">Upload now</button>
+        ` : ''}
+      `;
+      gate.classList.remove('hidden');
+      if (showActions) {
+        const topWin = window.top || window;
+        document.getElementById('gate-login').onclick = () => topWin.location.href = '/login';
+        document.getElementById('gate-upload').onclick = () => topWin.location.href = '/';
+      }
+    }
+
     async function renderAll() {
-      document.getElementById('msg').classList.remove('hidden');
+      if (!fileUrl) {
+        msg.textContent = 'No file parameter.';
+        return;
+      }
+
+      msg.classList.remove('hidden');
+
+      const { isAuthenticated, uploadCount } = await getAuthState();
+      const canViewFull = isAuthenticated && uploadCount >= 3;
+      const pageLimit = canViewFull ? Number.POSITIVE_INFINITY : 5;
+
       zoom = parseZoomFromHash();
       pdfDoc = await pdfjsLib.getDocument({
         url: fileUrl,
@@ -50,8 +110,12 @@
         disableRange: false,
       }).promise;
 
+      // Render pages (respect limit)
       pages.innerHTML = '';
-      for (let p = 1; p <= pdfDoc.numPages; p++) {
+      const total = pdfDoc.numPages;
+      const maxPages = Math.min(total, pageLimit);
+
+      for (let p = 1; p <= maxPages; p++) {
         const page = await pdfDoc.getPage(p);
         const viewport = page.getViewport({ scale: zoom });
         const canvas = document.createElement('canvas');
@@ -61,19 +125,49 @@
         pages.appendChild(canvas);
         await page.render({ canvasContext: ctx, viewport }).promise;
       }
-      document.getElementById('msg').classList.add('hidden');
+
+      msg.classList.add('hidden');
+
+      // Gate message if limited
+      if (!canViewFull) {
+        if (!isAuthenticated) {
+          showGate('Please sign in and upload at least 3 documents to view the full PDF.', true);
+        } else if (uploadCount < 3) {
+          const remain = 3 - uploadCount;
+          showGate(`Please upload at least ${remain} more document(s) to view the full PDF.`, true);
+        }
+      }
+
+      // Focus so arrow keys work
       setTimeout(() => pages.focus({ preventScroll: true }), 0);
     }
 
+    // React to hash zoom changes
     window.addEventListener('hashchange', async () => {
       const newZoom = parseZoomFromHash();
       if (Math.abs(newZoom - zoom) < 0.0001) return;
       zoom = newZoom;
       if (!pdfDoc) return;
-      document.getElementById('msg').classList.remove('hidden');
-      const num = pdfDoc.numPages;
+
+      msg.classList.remove('hidden');
+      const total = pdfDoc.numPages;
+
+      // Re-evaluate gating on zoom changes (no extra auth call needed)
+      const token = localStorage.getItem('token');
+      let canViewFull = false;
+      if (token) {
+        try {
+          const r = await fetch(`${API_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+          if (r.ok) {
+            const d = await r.json();
+            canViewFull = (d?.user?.uploadCount ?? 0) >= 3;
+          }
+        } catch {}
+      }
+      const maxPages = canViewFull ? total : Math.min(total, 5);
+
       pages.innerHTML = '';
-      for (let p = 1; p <= num; p++) {
+      for (let p = 1; p <= maxPages; p++) {
         const page = await pdfDoc.getPage(p);
         const viewport = page.getViewport({ scale: zoom });
         const canvas = document.createElement('canvas');
@@ -83,17 +177,16 @@
         pages.appendChild(canvas);
         await page.render({ canvasContext: ctx, viewport }).promise;
       }
-      document.getElementById('msg').classList.add('hidden');
+      msg.classList.add('hidden');
     });
 
-    // Keyboard scrolling (already working)
+    // Keyboard scrolling
     function scrollStep(pxY, pxX = 0) {
       pages.scrollBy({ top: pxY, left: pxX, behavior: 'smooth' });
     }
     window.addEventListener('keydown', (e) => {
-      const active = document.activeElement;
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
-
+      const a = document.activeElement;
+      if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return;
       const pageStep = Math.max(100, Math.floor(pages.clientHeight * 0.9));
       switch (e.key) {
         case 'ArrowDown': e.preventDefault(); scrollStep(100); break;
@@ -106,70 +199,45 @@
       }
     });
 
-    // Fix mouse-wheel/trackpad scrolling to always scroll the PDF container
+    // Wheel scroll: ensure container scrolls
     pages.addEventListener('wheel', (e) => {
-      if (e.ctrlKey) return; // let browser handle Ctrl+wheel (zoom)
-      e.preventDefault(); // ensure parent page doesn't eat the scroll
-      const factor = (e.deltaMode === 1) ? 16 : 1; // line -> px
-      const dy = e.deltaY * factor;
-      const dx = e.deltaX * factor;
-      pages.scrollBy({ top: dy, left: dx, behavior: 'auto' });
+      if (e.ctrlKey) return; // browser zoom
+      e.preventDefault();
+      const factor = (e.deltaMode === 1) ? 16 : 1;
+      pages.scrollBy({ top: e.deltaY * factor, left: e.deltaX * factor, behavior: 'auto' });
     }, { passive: false });
 
-    // Robust grab-to-pan (mouse, pen, touch)
-    let panning = false;
-    let pointerId = null;
-    let startX = 0, startY = 0, startScrollLeft = 0, startScrollTop = 0;
-
+    // Grab-to-pan (mouse/pen/touch)
+    let panning = false, pointerId = null, startX = 0, startY = 0, sL = 0, sT = 0;
     const beginPan = (e) => {
-      // Only primary button for mouse; allow pen/touch
       if (e.pointerType === 'mouse' && e.button !== 0) return;
-      panning = true;
-      pointerId = e.pointerId;
-      startX = e.clientX;
-      startY = e.clientY;
-      startScrollLeft = pages.scrollLeft;
-      startScrollTop = pages.scrollTop;
-      pages.classList.add('grabbing');
-      pages.style.userSelect = 'none';
-      pages.style.touchAction = 'none';
-      e.preventDefault();
-
-      // track on document to avoid losing events
+      panning = true; pointerId = e.pointerId;
+      startX = e.clientX; startY = e.clientY; sL = pages.scrollLeft; sT = pages.scrollTop;
+      pages.classList.add('grabbing'); pages.style.userSelect = 'none'; pages.style.touchAction = 'none'; e.preventDefault();
       document.addEventListener('pointermove', doPan, { passive: false });
       document.addEventListener('pointerup', endPan, { passive: false });
       document.addEventListener('pointercancel', endPan, { passive: false });
     };
-
     const doPan = (e) => {
-      if (!panning || e.pointerId !== pointerId) return;
-      e.preventDefault();
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      pages.scrollLeft = startScrollLeft - dx;
-      pages.scrollTop = startScrollTop - dy;
+      if (!panning || e.pointerId !== pointerId) return; e.preventDefault();
+      pages.scrollLeft = sL - (e.clientX - startX);
+      pages.scrollTop  = sT - (e.clientY - startY);
     };
-
     const endPan = (e) => {
       if (!panning || e.pointerId !== pointerId) return;
-      panning = false;
-      pointerId = null;
-      pages.classList.remove('grabbing');
-      pages.style.userSelect = '';
-      pages.style.touchAction = 'pan-x pan-y';
+      panning = false; pointerId = null;
+      pages.classList.remove('grabbing'); pages.style.userSelect = ''; pages.style.touchAction = 'pan-x pan-y';
       document.removeEventListener('pointermove', doPan);
       document.removeEventListener('pointerup', endPan);
       document.removeEventListener('pointercancel', endPan);
     };
-
     pages.addEventListener('pointerdown', beginPan);
 
-    // Initial render
-    if (!fileUrl) {
-      document.getElementById('msg').textContent = 'No file parameter.';
-    } else {
-      renderAll();
-    }
+    // Start
+    renderAll().catch(err => {
+      console.error(err);
+      msg.textContent = 'Failed to load PDF.';
+    });
   </script>
 </body>
 </html>
