@@ -2,6 +2,7 @@ const ResourceRepo = require('../repositories/ResourceRepo');
 const UserRepo = require('../repositories/UserRepo');
 const FileService = require('./FileService');
 const { contentTypeFor } = require('../utils/contentType');
+const DownloadRepo = require('../repositories/DownloadRepo');
 
 class ResourceService {
   async listAll() { return ResourceRepo.findAll(); }
@@ -10,6 +11,7 @@ class ResourceService {
   async listBySubject(subject) { return ResourceRepo.findBySubject(subject); }
   async getById(id) { return ResourceRepo.findById(id); }
   async myUploads(userId) { return ResourceRepo.myUploads(userId); }
+  async myDownloads(userId) { return DownloadRepo.findResourcesByUser(userId, 100); }
 
   async upload({ userId, file, title, subject, description }) {
     const meta = await FileService.upload(file.buffer, file.originalname, file.mimetype, { uploader: userId });
@@ -39,6 +41,7 @@ class ResourceService {
     await Promise.all([
       ResourceRepo.incDownloads(resourceId, 1),
       userId ? UserRepo.incDownloadCount(userId, 1) : Promise.resolve(),
+      userId ? DownloadRepo.record(userId, resourceId) : Promise.resolve(),
     ]);
   }
 }

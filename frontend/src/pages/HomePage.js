@@ -471,14 +471,38 @@ export default function HomePage() {
     navigate(`/document/${resource._id}`);
   };
 
+  // Show all documents from the subject list
+  const handleAllClick = async () => {
+    try {
+      // clear filters and exit popular mode if present
+      if (typeof setSelectedSubject === 'function') setSelectedSubject('');
+      if (typeof setViewMode === 'function') setViewMode('all');
+      if (typeof setPopularMode === 'function') setPopularMode(false);
+
+      if (typeof fetchAll === 'function') {
+        await fetchAll();
+        return;
+      }
+      // fallback (in case fetchAll is not in scope)
+      setLoading?.(true);
+      const res = await fetch(`${API_URL}/resource/all`);
+      const data = await res.json();
+      if (data.success) setResources?.(data.resources);
+    } catch (e) {
+      console.error('Error fetching all:', e);
+    } finally {
+      setLoading?.(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white shadow-sm sticky top-0 z-10">
-        <div className="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
+      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-3xl">📚</span>
-            <h1 className="text-indigo-600 text-2xl font-bold">Student Doc</h1>
+            <span className="material-icons-outlined text-indigo-600 text-4xl">school</span>
+            <h1 className="text-2xl font-bold text-gray-900">eduShare</h1>
           </div>
           <div className="flex items-center gap-4">
             <button
@@ -612,6 +636,18 @@ export default function HomePage() {
 
             {/* Subject Tags */}
             <div className="flex flex-wrap gap-2 mt-4">
+              {/* All button */}
+              <button
+                onClick={handleAllClick}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                  !selectedSubject
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 text-gray-700"
+                }`}
+              >
+                All
+              </button>
+
               {subjects.map((subject) => (
                 <button
                   key={subject}

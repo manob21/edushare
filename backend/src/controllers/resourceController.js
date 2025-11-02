@@ -34,8 +34,8 @@ exports.myUploads = asyncHandler(async (req, res) => {
 
 // Placeholder my-downloads (keep behavior)
 exports.myDownloads = asyncHandler(async (req, res) => {
-  const resources = await ResourceService.listAll();
-  res.json({ success: true, resources: resources.slice(0, 50) });
+  const resources = await ResourceService.myDownloads(req.user.id);
+  res.json({ success: true, resources });
 });
 
 exports.upload = asyncHandler(async (req, res) => {
