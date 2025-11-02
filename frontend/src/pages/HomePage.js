@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 
 const DEFAULT_SUBJECTS = [
   "Computer Science",
+  "Software Engineering",
   "Mathematics",
   "Physics",
   "Chemistry",
@@ -9,6 +10,7 @@ const DEFAULT_SUBJECTS = [
   "Biology",
   "History",
   "Economics",
+ 
 ];
 
 const API_URL = 'http://localhost:5000/api';
@@ -25,6 +27,8 @@ export default function HomePage() {
     email: "",
     avatar: null,
   });
+  const [profileUploading, setProfileUploading] = useState(false);
+  const [profileMessage, setProfileMessage] = useState('');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadForm, setUploadForm] = useState({
     title: "",
@@ -103,14 +107,64 @@ export default function HomePage() {
         setUser({
           name: data.user.name,
           email: data.user.email,
-          avatar: null,
-        });
+          avatar: data.user.profilePicture ? `http://localhost:5000${data.user.profilePicture}` : null,
+        });  
         setUserUploads(data.user.uploadCount);
         setUserDownloads(data.user.downloadCount);
         setIsAuthenticated(true);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
+    }
+  };
+
+  // Upload profile picture handler (opens on file selection)
+  const handleProfileFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Simple client-side validation
+    if (!/image\/(jpeg|png|jpg)/.test(file.type)) {
+      setProfileMessage('Only JPG/JPEG/PNG files are allowed');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setProfileMessage('File size should not exceed 5MB');
+      return;
+    }
+
+    setProfileUploading(true);
+    setProfileMessage('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const formData = new FormData();
+      formData.append('profilePicture', file);
+
+      const res = await fetch(`${API_URL}/auth/profile`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setProfileMessage(data.message || 'Error uploading profile picture');
+      } else {
+        // Update avatar url to full path
+        const newAvatar = data.user.profilePicture ? `http://localhost:5000${data.user.profilePicture}` : null;
+        setUser((u) => ({ ...u, avatar: newAvatar, name: data.user.name }));
+        setProfileMessage('Profile picture updated');
+      }
+    } catch (err) {
+      console.error('Profile upload error', err);
+      setProfileMessage('Error uploading profile picture');
+    } finally {
+      setProfileUploading(false);
+      // clear the file input value so same file can be reselected if needed
+      e.target.value = '';
     }
   };
 
@@ -436,7 +490,15 @@ export default function HomePage() {
               >
                 Logout
               </button>
-            ) : (
+              ) : null}
+              {isAuthenticated ? (
+                <a
+                  href="/profile"
+                  className="text-indigo-600 hover:text-indigo-700 font-medium px-4 py-2 border-2 border-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors"
+                >
+                  Edit Profile
+                </a>
+              ) : (
               <button
                 onClick={handleAuthButtonClick}
                 className="text-indigo-600 hover:text-indigo-700 font-medium px-4 py-2 border-2 border-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors"
@@ -454,9 +516,43 @@ export default function HomePage() {
           <aside className="lg:col-span-1">
             <div className="bg-white rounded-xl shadow-sm p-6 sticky top-24">
               <div className="flex flex-col items-center mb-6">
-                <div className="w-24 h-24 rounded-full bg-indigo-600 flex items-center justify-center text-white text-4xl mb-3">
-                  👤
+                <div className="mb-3 relative">
+                  {user.avatar ? (
+                    <img
+                      src={user.avatar}
+                      alt="Avatar"
+                      className="w-24 h-24 rounded-full object-cover border"
+                    />
+                  ) : (
+                    <div className="w-24 h-24 rounded-full bg-indigo-600 flex items-center justify-center text-white text-4xl">
+                      👤
+                    </div>
+                  )}
+
+                  {isAuthenticated && (
+                    <>
+                      <input
+                        id="profilePicInput"
+                        type="file"
+                        accept="image/jpeg,image/png,image/jpg"
+                        onChange={handleProfileFileChange}
+                        className="hidden"
+                      />
+                      <label
+  htmlFor="profilePicInput"
+  title="Change profile picture"
+  className="absolute bottom-0 right-0 bg-white p-1.5 rounded-full border cursor-pointer shadow-md hover:bg-gray-50 flex items-center justify-center w-8 h-8"
+>
+  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" viewBox="0 0 20 20" fill="currentColor">
+    <path fillRule="evenodd" d="M4 5a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-1.586a1 1 0 01-.707-.293l-1.121-1.121A2 2 0 0011.172 3H8.828a2 2 0 00-1.414.586L6.293 4.707A1 1 0 015.586 5H4zm6 9a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+  </svg>
+</label>
+                    </>
+                  )}
                 </div>
+                {profileMessage && (
+                  <p className="text-xs mt-2 text-center text-red-600">{profileMessage}</p>
+                )}
                 <h2 className="text-xl font-bold text-gray-900">{user.name}</h2>
                 <p className="text-sm text-gray-500">{user.email}</p>
               </div>

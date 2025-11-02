@@ -158,13 +158,53 @@ exports.getCurrentUser = async (req, res) => {
         email: user.email,
         uploadCount: user.uploadCount,
         downloadCount: user.downloadCount,
-        credits: user.credits
+        credits: user.credits,
+        profilePicture: user.profilePicture
       }
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: 'Error fetching user',
+      error: error.message
+    });
+  }
+};
+
+// Update Profile
+exports.updateProfile = async (req, res) => {
+  try {
+    const { name } = req.body;
+    const updates = { name };
+
+    // If there's a profile picture upload
+    if (req.file) {
+      updates.profilePicture = `/uploads/profiles/${req.file.filename}`;
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      updates,
+      { new: true, runValidators: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        uploadCount: user.uploadCount,
+        downloadCount: user.downloadCount,
+        credits: user.credits,
+        profilePicture: user.profilePicture
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error updating profile',
       error: error.message
     });
   }
