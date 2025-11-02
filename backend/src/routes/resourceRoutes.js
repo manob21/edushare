@@ -7,6 +7,7 @@ const multer = require('multer');
 
 const { protect } = require('../middleware/auth');
 const Resource = require('../models/Resource');
+const User = require('../models/user'); // ADD
 
 const uploadMem = multer({
   storage: multer.memoryStorage(),
@@ -79,6 +80,7 @@ router.get('/my-downloads', protect, async (req, res) => {
 });
 
 // ---------------- Upload to GridFS ----------------
+// Upload (GridFS) — increment user's uploadCount
 router.post('/upload', protect, uploadMem.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file' });
@@ -99,7 +101,6 @@ router.post('/upload', protect, uploadMem.single('file'), async (req, res) => {
 
     uploadStream.once('finish', async () => {
       try {
-        // fetch file doc to get size
         const files = await bucket.find({ _id: fileId }).toArray();
         const fileDoc = files[0];
 
@@ -107,16 +108,28 @@ router.post('/upload', protect, uploadMem.single('file'), async (req, res) => {
           title: req.body.title,
           subject: req.body.subject,
           description: req.body.description,
-          uploadedBy: req.user.id, // IMPORTANT: match schema field
+          uploadedBy: req.user.id,
           fileName: req.file.originalname,
-          contentType: req.file.mimetype || contentTypeFor(req.file.originalname),
+          contentType: req.file.mimetype,
           storage: 'gridfs',
           gridFsId: fileId,
           fileSize: fileDoc?.length,
-          // keep fileUrl empty for gridfs
         });
 
-        res.status(201).json({ resource: doc });
+        // increment user uploadCount
+        const updatedUser = await User.findByIdAndUpdate(
+          req.user.id,
+          { $inc: { uploadCount: 1 } },
+          { new: true }
+        ).select('uploadCount downloadCount');
+
+        res.status(201).json({
+          resource: doc,
+          counters: updatedUser ? {
+            uploadCount: updatedUser.uploadCount,
+            downloadCount: updatedUser.downloadCount,
+          } : undefined,
+        });
       } catch (e) {
         console.error('Post-upload save error:', e);
         if (!res.headersSent) res.status(500).json({ message: 'Upload failed' });
@@ -189,11 +202,18 @@ router.get('/view/:id', async (req, res) => {
   }
 });
 
-// ---------------- Download (attachment) ----------------
+// Download — increment user's downloadCount and resource downloads
 router.get('/download/:id', protect, async (req, res) => {
   try {
     const r = await Resource.findById(req.params.id);
     if (!r) return res.status(404).json({ message: 'Resource not found' });
+
+    // fire-and-forget counter updates
+    Promise.allSettled([
+      User.findByIdAndUpdate(req.user.id, { $inc: { downloadCount: 1 } }),
+      Resource.findByIdAndUpdate(r._id, { $inc: { downloads: 1 } }),
+    ]).catch(() => { });
+
     res.setHeader('Content-Disposition', `attachment; filename="${r.fileName}"`);
     res.setHeader('Content-Type', r.contentType || 'application/octet-stream');
 

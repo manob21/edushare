@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const userSchema = new mongoose.Schema({
+const UserSchema = new mongoose.Schema({
   name: {
     type: String,
     required: [true, 'Please provide your name'],
@@ -19,14 +19,8 @@ const userSchema = new mongoose.Schema({
     minlength: 6,
     select: false
   },
-  uploadCount: {
-    type: Number,
-    default: 0
-  },
-  downloadCount: {
-    type: Number,
-    default: 0
-  },
+  uploadCount: { type: Number, default: 0 },
+  downloadCount: { type: Number, default: 0 },
   downloadedResources: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Resource'
@@ -34,11 +28,7 @@ const userSchema = new mongoose.Schema({
   credits: {
     type: Number,
     default: 50
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
   }
-});
+}, { timestamps: true });
 
-module.exports = mongoose.model('User', userSchema);
+module.exports = mongoose.model('User', UserSchema);
