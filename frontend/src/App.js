@@ -2,6 +2,7 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import DocumentViewer from "./pages/DocumentViewer";
+import { ResourcesProvider } from './context/ResourcesProvider';
 
 function CategoryPagePlaceholder() {
   return (
@@ -19,10 +20,12 @@ function CategoryPagePlaceholder() {
 export default function App() {
   return (
     <Router>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/document/:id" element={<DocumentViewer />} />
-      </Routes>
+      <ResourcesProvider>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/document/:id" element={<DocumentViewer />} />
+        </Routes>
+      </ResourcesProvider>
     </Router>
   );
 }
