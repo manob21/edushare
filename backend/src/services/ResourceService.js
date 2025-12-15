@@ -3,6 +3,7 @@ const UserRepo = require('../repositories/UserRepo');
 const FileService = require('./FileService');
 const { contentTypeFor } = require('../utils/contentType');
 const DownloadRepo = require('../repositories/DownloadRepo');
+const { extractFirstPages, isPdf } = require('../utils/pdfExtractor');
 
 class ResourceService {
   async listAll() { return ResourceRepo.findAll(); }
@@ -14,6 +15,7 @@ class ResourceService {
   async myDownloads(userId) { return DownloadRepo.findResourcesByUser(userId, 100); }
 
   async upload({ userId, file, title, subject, description }) {
+    // Upload the full file
     const meta = await FileService.upload(file.buffer, file.originalname, file.mimetype, { uploader: userId });
 
     const resourceDoc = {
@@ -31,6 +33,23 @@ class ResourceService {
       name: file.originalname,
       url: FileService.isGridFs() ? undefined : meta.filePath,
     };
+
+    // If the file is a PDF, generate and save a preview (first 5 pages)
+    if (isPdf(file.mimetype)) {
+      try {
+        const previewBuffer = await extractFirstPages(file.buffer, 5);
+        const previewFilename = `preview_${file.originalname}`;
+        const previewMeta = await FileService.upload(previewBuffer, previewFilename, file.mimetype, { uploader: userId, isPreview: true });
+        
+        // Add preview fields to resource document
+        resourceDoc.previewGridFsId = FileService.isGridFs() ? previewMeta.id : undefined;
+        resourceDoc.previewFileUrl = FileService.isGridFs() ? undefined : previewMeta.filePath;
+        resourceDoc.previewFileSize = previewMeta.length;
+      } catch (error) {
+        console.error('Failed to generate PDF preview:', error);
+        // Continue without preview if it fails - preview is optional
+      }
+    }
 
     const doc = await ResourceRepo.create(resourceDoc);
     const updatedUser = await UserRepo.incUploadCount(userId, 1);

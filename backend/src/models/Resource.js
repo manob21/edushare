@@ -29,6 +29,11 @@ const ResourceSchema = new mongoose.Schema(
     gridFsId: { type: mongoose.Schema.Types.ObjectId },
     fileSize: { type: Number },
 
+    // preview file fields (for first 5 pages of PDF)
+    previewGridFsId: { type: mongoose.Schema.Types.ObjectId },
+    previewFileUrl: { type: String },
+    previewFileSize: { type: Number },
+
     // per-file stats
     downloads: { type: Number, default: 0 },
   },

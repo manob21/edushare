@@ -115,3 +115,49 @@ exports.getById = asyncHandler(async (req, res) => {
   if (!resource) return res.status(404).json({ message: 'Resource not found' });
   res.json({ resource });
 });
+
+exports.preview = asyncHandler(async (req, res) => {
+  const resource = await ResourceService.getById(req.params.id);
+  if (!resource) return res.status(404).json({ message: 'Resource not found' });
+
+  // Check if preview exists
+  if (!resource.previewGridFsId && !resource.previewFileUrl) {
+    return res.status(404).json({ message: 'Preview not available for this resource' });
+  }
+
+  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Content-Disposition', `inline; filename="preview_${resource.fileName}"`);
+  res.setHeader('Content-Type', resource.contentType || contentTypeFor(resource.fileName));
+
+  // GridFS
+  if (resource.storage === 'gridfs' && resource.previewGridFsId) {
+    const stat = await FileService.stat(resource.previewGridFsId);
+    if (!stat) return res.status(404).json({ message: 'Preview file not found' });
+
+    const range = parseRangeHeader(req.headers.range, stat.length);
+    if (range?.invalid) {
+      return res.status(416).set({ 'Content-Range': `bytes */${stat.length}` }).end();
+    }
+    if (range) {
+      res.status(206).set({ 'Content-Range': `bytes ${range.start}-${range.end}/${stat.length}`, 'Content-Length': range.chunk });
+      return FileService.openDownloadStream(resource.previewGridFsId, { start: range.start, endExclusive: range.end + 1 }).pipe(res);
+    }
+    res.status(200).set({ 'Content-Length': stat.length });
+    return FileService.openDownloadStream(resource.previewGridFsId).pipe(res);
+  }
+
+  // Disk fallback
+  const filePath = resource.previewFileUrl ? path.resolve(resource.previewFileUrl) : '';
+  if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ message: 'Preview file not found' });
+  const stat = fs.statSync(filePath);
+  const range = parseRangeHeader(req.headers.range, stat.size);
+  if (range?.invalid) return res.status(416).set({ 'Content-Range': `bytes */${stat.size}` }).end();
+  if (range) {
+    res.status(206).set({ 'Content-Range': `bytes ${range.start}-${range.end}/${stat.size}`, 'Content-Length': range.chunk });
+    return fs.createReadStream(filePath, { start: range.start, end: range.end }).pipe(res);
+  }
+  res.status(200).set({ 'Content-Length': stat.size });
+  fs.createReadStream(filePath).pipe(res);
+});

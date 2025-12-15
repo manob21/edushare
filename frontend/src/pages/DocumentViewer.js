@@ -20,16 +20,21 @@ export default function DocumentViewer() {
 
   const canDownload = uploads >= 3;
   const isPdf = resource && ext(resource.fileName) === 'pdf';
+  
+  // Determine if user should see preview or full document
+  const shouldShowPreview = !isAuthenticated || !canDownload;
 
   const viewerUrl = useMemo(() => {
     if (!resource) return null;
     const isPdf = resource.fileName?.toLowerCase().endsWith('.pdf');
     if (isPdf) {
-      const file = `${FILE_ORIGIN}/api/resource/view/${id}`;
+      // Use preview endpoint for restricted users, full view for authorized users
+      const endpoint = shouldShowPreview ? 'preview' : 'view';
+      const file = `${FILE_ORIGIN}/api/resource/${endpoint}/${id}`;
       return `/pdf-viewer/index.html?file=${encodeURIComponent(file)}#zoom=${zoom}`;
     }
     return resource.fileUrl ? `${FILE_ORIGIN}${resource.fileUrl}` : null;
-  }, [resource, id, zoom]);
+  }, [resource, id, zoom, shouldShowPreview]);
 
   useEffect(() => {
     const run = async () => {
@@ -104,6 +109,11 @@ export default function DocumentViewer() {
       <div className="flex items-center justify-between px-4 py-3 bg-white shadow">
         <div className="font-semibold text-gray-900 truncate max-w-[60vw]">
           {resource?.title || 'Opening...'}
+          {shouldShowPreview && isPdf && (
+            <span className="ml-2 text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
+              Preview Only (First 5 Pages)
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -115,6 +125,29 @@ export default function DocumentViewer() {
           </button>
         </div>
       </div>
+
+      {/* Preview Notice Banner */}
+      {shouldShowPreview && isPdf && (
+        <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-3">
+          <div className="flex items-center justify-between max-w-7xl mx-auto">
+            <div className="flex items-center gap-2">
+              <span className="material-icons-outlined text-yellow-600">info</span>
+              <p className="text-sm text-yellow-800">
+                {!isAuthenticated ? (
+                  <span>
+                    <strong>Preview Mode:</strong> You're viewing the first 5 pages only. 
+                    <strong> Login</strong> and <strong>upload 3 documents</strong> to access full documents.
+                  </span>
+                ) : (
+                  <span>
+                    <strong>Preview Mode:</strong> Upload {3 - uploads} more document{3 - uploads > 1 ? 's' : ''} to unlock full document access and downloads.
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Viewer */}
       <div className="relative flex-1 overflow-hidden bg-gray-900">

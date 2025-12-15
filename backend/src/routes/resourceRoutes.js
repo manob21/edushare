@@ -26,6 +26,7 @@ router.post('/upload', protect, uploadMem.single('file'), ResourceController.upl
 
 // View and download
 router.get('/view/:id', ResourceController.view);
+router.get('/preview/:id', ResourceController.preview);
 router.get('/download/:id', protect, ResourceController.download);
 
 // Generic get-by-id
