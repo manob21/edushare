@@ -1,17 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
-import DocumentViewer from './DocumentViewer'; // Add this import
-import { Link, useNavigate } from 'react-router-dom'; // Import Link for navigation
-
-const DEFAULT_SUBJECTS = [
-  "Computer Science",
-  "Mathematics",
-  "Physics",
-  "Chemistry",
-  "English",
-  "Biology",
-  "History",
-  "Economics",
-];
+import DocumentViewer from './DocumentViewer';
+import { Link, useNavigate } from 'react-router-dom';
+import { getAllCategories, getLevelsForCategory, getSubjectsForLevel, getGroupsForLevel } from '../config/categoryConfig';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
@@ -30,26 +20,32 @@ export default function HomePage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadForm, setUploadForm] = useState({
     title: "",
-    subject: "",
     description: "",
     file: null,
-    newSubject: "",
+    category: "",
+    level: "",
+    group: "",
+    subjectCategory: "",
+    topic: ""
   });
   const [uploading, setUploading] = useState(false);
   const [resources, setResources] = useState([]);
   const [loading, setLoading] = useState(true);
+  
+  // New hierarchical navigation states
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [selectedLevel, setSelectedLevel] = useState(null);
+  const [selectedGroup, setSelectedGroup] = useState(null);
   const [selectedSubject, setSelectedSubject] = useState(null);
-  const [subjects, setSubjects] = useState(DEFAULT_SUBJECTS);
+  const [hoveredCategory, setHoveredCategory] = useState(null);
+  
   const [showDocumentModal, setShowDocumentModal] = useState(false);
-  const [documentListType, setDocumentListType] = useState(''); // 'uploaded' or 'downloaded'
+  const [documentListType, setDocumentListType] = useState('');
   const [userDocuments, setUserDocuments] = useState([]);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
-  const [selectedDocument, setSelectedDocument] = useState(null); // Add this state
-  const [popularMode, setPopularMode] = useState(false);
-  const [viewMode, setViewMode] = useState('all'); // 'all' | 'popular'
+  const [selectedDocument, setSelectedDocument] = useState(null);
   const navigate = useNavigate();
 
-  // Form states
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [signupForm, setSignupForm] = useState({
     name: "",
@@ -58,22 +54,26 @@ export default function HomePage() {
     confirmPassword: "",
   });
 
-  // Define canDownload based on userUploads
   const canDownload = userUploads >= 3;
   const uploadsNeeded = 3 - userUploads;
 
-  // Fetch subjects on component mount
-  useEffect(() => {
-    fetchSubjects();
-  }, []);
+  const categories = getAllCategories();
 
-  // Wrap fetchResources to satisfy eslint exhaustive-deps
+  // Fetch resources based on filters
   const fetchResources = useCallback(async () => {
     try {
       setLoading(true);
-      const endpoint = selectedSubject
-        ? `${API_URL}/resource/subject/${encodeURIComponent(selectedSubject)}`
-        : `${API_URL}/resource/all`;
+      let endpoint = `${API_URL}/resource/all`;
+      const params = new URLSearchParams();
+      
+      if (selectedCategory) params.append('category', selectedCategory);
+      if (selectedLevel) params.append('level', selectedLevel);
+      if (selectedGroup) params.append('group', selectedGroup);
+      if (selectedSubject) params.append('subject', selectedSubject);
+      
+      if (params.toString()) {
+        endpoint = `${API_URL}/resource/filter?${params.toString()}`;
+      }
 
       const response = await fetch(endpoint);
       const data = await response.json();
@@ -83,14 +83,12 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedSubject]);
+  }, [selectedCategory, selectedLevel, selectedGroup, selectedSubject]);
 
-  // Fetch when subject changes
   useEffect(() => {
     fetchResources();
   }, [fetchResources]);
 
-  // Check if user is logged in on mount
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
@@ -98,30 +96,12 @@ export default function HomePage() {
     }
   }, []);
 
-  const fetchSubjects = async () => {
-    try {
-      const response = await fetch(`${API_URL}/resource/subjects`);
-      const data = await response.json();
-      
-      if (response.ok && data.subjects.length > 0) {
-        // Merge default subjects with database subjects, remove duplicates
-        const allSubjects = [...new Set([...DEFAULT_SUBJECTS, ...data.subjects])];
-        setSubjects(allSubjects.sort());
-      }
-    } catch (error) {
-      console.error('Error fetching subjects:', error);
-    }
-  };
-
   const fetchCurrentUser = async () => {
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`${API_URL}/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-
       const data = await response.json();
       if (response.ok) {
         setUser({
@@ -147,11 +127,8 @@ export default function HomePage() {
         : `${API_URL}/resource/my-downloads`;
       
       const response = await fetch(endpoint, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-
       const data = await response.json();
       if (response.ok) {
         setUserDocuments(data.resources);
@@ -178,55 +155,28 @@ export default function HomePage() {
     setDocumentListType('');
   };
 
-  // Fetch top 10 most downloaded
-  const fetchPopular = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch(`${API_URL}/resource/popular`);
-      const data = await res.json();
-      if (data.success) {
-        setResources(data.resources);
-        setViewMode('popular');
-        setSelectedSubject && setSelectedSubject('');
-      }
-    } catch (err) {
-      console.error('Error fetching popular:', err);
-    } finally {
-      setLoading(false);
-    }
+  const handleCategorySelect = (categoryKey, levelValue) => {
+    setSelectedCategory(categoryKey);
+    setSelectedLevel(levelValue);
+    setSelectedGroup(null);
+    setSelectedSubject(null);
+    setHoveredCategory(null);
   };
 
-  // Back to all
-  const fetchAll = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch(`${API_URL}/resource/all`);
-      const data = await res.json();
-      if (data.success) {
-        setResources(data.resources);
-        setViewMode('all');
-      }
-    } catch (err) {
-      console.error('Error fetching all:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Subject click -> that subject’s materials
-  const handleSubjectClick = async (subject) => {
+  const handleSubjectSelect = (subject) => {
     setSelectedSubject(subject);
-    setViewMode('all');
-    try {
-      setLoading(true);
-      const res = await fetch(`${API_URL}/resource/subject/${encodeURIComponent(subject)}`);
-      const data = await res.json();
-      if (data.success) setResources(data.resources);
-    } catch (e) {
-      console.error('Error fetching subject resources:', e);
-    } finally {
-      setLoading(false);
-    }
+  };
+
+  const handleGroupSelect = (group) => {
+    setSelectedGroup(group);
+    setSelectedSubject(null);
+  };
+
+  const handleResetFilters = () => {
+    setSelectedCategory(null);
+    setSelectedLevel(null);
+    setSelectedGroup(null);
+    setSelectedSubject(null);
   };
 
   const handleDownload = async (resourceId) => {
@@ -243,12 +193,9 @@ export default function HomePage() {
 
     try {
       const token = localStorage.getItem('token');
-      
       const response = await fetch(`${API_URL}/resource/download/${resourceId}`, {
         method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (response.ok) {
@@ -272,7 +219,6 @@ export default function HomePage() {
         window.URL.revokeObjectURL(url);
 
         await fetchCurrentUser();
-        
         alert('Download started successfully!');
       } else {
         const data = await response.json();
@@ -297,39 +243,28 @@ export default function HomePage() {
     setUploadForm({ ...uploadForm, file: e.target.files[0] });
   };
 
-  const handleSubjectChange = (e) => {
-    const selected = e.target.value;
-    setUploadForm({ ...uploadForm, subject: selected, newSubject: "" });
-  };
-
-  const handleNewSubjectChange = (e) => {
-    setUploadForm({ ...uploadForm, newSubject: e.target.value });
-  };
-
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
-    
-    // Validate that if "Other" is selected, a new subject is provided
-    if (uploadForm.subject === "Other" && !uploadForm.newSubject.trim()) {
-      alert("Please enter a subject name");
-      return;
-    }
-    
     setUploading(true);
 
     try {
       const token = localStorage.getItem("token");
       const formData = new FormData();
       formData.append("title", uploadForm.title);
-      formData.append("subject", uploadForm.subject === "Other" ? uploadForm.newSubject.trim() : uploadForm.subject);
       formData.append("description", uploadForm.description);
+      formData.append("category", uploadForm.category);
+      formData.append("level", uploadForm.level);
+      if (uploadForm.group) formData.append("group", uploadForm.group);
+      formData.append("subjectCategory", uploadForm.subjectCategory);
+      if (uploadForm.topic) formData.append("topic", uploadForm.topic);
       formData.append("file", uploadForm.file);
+      
+      // For backward compatibility
+      formData.append("subject", uploadForm.subjectCategory);
 
       const response = await fetch(`${API_URL}/resource/upload`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
@@ -343,14 +278,18 @@ export default function HomePage() {
 
       alert("Resource uploaded successfully!");
       setShowUploadModal(false);
-      setUploadForm({ title: "", subject: "", description: "", file: null, newSubject: "" });
+      setUploadForm({ 
+        title: "", 
+        description: "", 
+        file: null, 
+        category: "", 
+        level: "", 
+        group: "", 
+        subjectCategory: "",
+        topic: ""
+      });
       
-      // Update user upload count
-      setUserUploads(data.user.uploadCount);
-      setUserDownloads(data.user.downloadCount);
-      
-      // Refresh subjects list and resources
-      await fetchSubjects();
+      setUserUploads(data.user?.uploadCount || userUploads + 1);
       await fetchResources();
     } catch (error) {
       setUploading(false);
@@ -365,21 +304,17 @@ export default function HomePage() {
     try {
       const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginForm),
       });
 
       const data = await response.json();
-
       if (!response.ok) {
         alert(data.message || 'Login failed');
         return;
       }
 
       localStorage.setItem('token', data.token);
-      
       setUser({
         name: data.user.name,
         email: data.user.email,
@@ -390,7 +325,6 @@ export default function HomePage() {
       setIsAuthenticated(true);
       setShowAuthModal(false);
       setLoginForm({ email: "", password: "" });
-      
       alert('Login successful!');
     } catch (error) {
       console.error('Login error:', error);
@@ -409,9 +343,7 @@ export default function HomePage() {
     try {
       const response = await fetch(`${API_URL}/auth/signup`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: signupForm.name,
           email: signupForm.email,
@@ -420,14 +352,12 @@ export default function HomePage() {
       });
 
       const data = await response.json();
-
       if (!response.ok) {
         alert(data.message || 'Signup failed');
         return;
       }
 
       localStorage.setItem('token', data.token);
-      
       setUser({
         name: data.user.name,
         email: data.user.email,
@@ -438,7 +368,6 @@ export default function HomePage() {
       setIsAuthenticated(true);
       setShowAuthModal(false);
       setSignupForm({ name: "", email: "", password: "", confirmPassword: "" });
-      
       alert('Account created successfully!');
     } catch (error) {
       console.error('Signup error:', error);
@@ -454,14 +383,6 @@ export default function HomePage() {
     setUserDownloads(0);
   };
 
-  const handleSubjectFilter = (subject) => {
-    if (selectedSubject === subject) {
-      setSelectedSubject(null);
-    } else {
-      setSelectedSubject(subject);
-    }
-  };
-
   const handleAuthButtonClick = () => {
     setAuthMode("login");
     setShowAuthModal(true);
@@ -471,29 +392,15 @@ export default function HomePage() {
     navigate(`/document/${resource._id}`);
   };
 
-  // Show all documents from the subject list
-  const handleAllClick = async () => {
-    try {
-      // clear filters and exit popular mode if present
-      if (typeof setSelectedSubject === 'function') setSelectedSubject('');
-      if (typeof setViewMode === 'function') setViewMode('all');
-      if (typeof setPopularMode === 'function') setPopularMode(false);
+  // Get current level subjects
+  const currentLevelSubjects = selectedCategory && selectedLevel 
+    ? getSubjectsForLevel(selectedCategory, selectedLevel, selectedGroup)
+    : [];
 
-      if (typeof fetchAll === 'function') {
-        await fetchAll();
-        return;
-      }
-      // fallback (in case fetchAll is not in scope)
-      setLoading?.(true);
-      const res = await fetch(`${API_URL}/resource/all`);
-      const data = await res.json();
-      if (data.success) setResources?.(data.resources);
-    } catch (e) {
-      console.error('Error fetching all:', e);
-    } finally {
-      setLoading?.(false);
-    }
-  };
+  // Get current level groups
+  const currentLevelGroups = selectedCategory && selectedLevel 
+    ? getGroupsForLevel(selectedCategory, selectedLevel)
+    : [];
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -527,6 +434,47 @@ export default function HomePage() {
                 Login / Sign Up
               </button>
             )}
+          </div>
+        </div>
+
+        {/* Category Navigation Bar */}
+        <div className="border-t border-gray-200 bg-white">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <nav className="flex items-center space-x-1 overflow-visible">
+              {categories.map((category) => (
+                <div
+                  key={category.key}
+                  className="relative group"
+                  onMouseEnter={() => setHoveredCategory(category.key)}
+                  onMouseLeave={() => setHoveredCategory(null)}
+                >
+                  <button
+                    className={`px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors ${
+                      selectedCategory === category.key
+                        ? 'text-indigo-600 border-b-2 border-indigo-600'
+                        : 'text-gray-700 hover:text-indigo-600 hover:bg-indigo-50'
+                    }`}
+                  >
+                    {category.display}
+                  </button>
+
+                  {/* Dropdown on hover */}
+                  {hoveredCategory === category.key && (
+                    <div className="absolute left-0 top-full mt-0 bg-white border border-gray-200 rounded-md shadow-lg min-w-[220px] max-h-[400px] overflow-y-auto z-[100]">
+                      {getLevelsForCategory(category.key).map((level) => (
+                        <button
+                          key={level.value}
+                          onClick={() => handleCategorySelect(category.key, level.value)}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-600"
+                        >
+                          {level.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </nav>
           </div>
         </div>
       </header>
@@ -621,7 +569,7 @@ export default function HomePage() {
             <h2 className="text-2xl font-bold text-gray-900 mb-4">
               Find Study Materials
             </h2>
-            <div className="relative">
+            <div className="relative mb-4">
               <input
                 type="text"
                 value={query}
@@ -634,41 +582,94 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* Subject Tags */}
-            <div className="flex flex-wrap gap-2 mt-4">
-              {/* All button */}
-              <button
-                onClick={handleAllClick}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                  !selectedSubject
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 text-gray-700"
-                }`}
-              >
-                All
-              </button>
+            {/* Current Selection Display */}
+            {selectedCategory && selectedLevel && (
+              <div className="bg-indigo-50 rounded-lg p-4 mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-gray-700">Current Selection:</h3>
+                  <button
+                    onClick={handleResetFilters}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <span className="px-3 py-1 bg-indigo-600 text-white rounded-full text-sm">
+                    {selectedLevel}
+                  </span>
+                  {selectedGroup && (
+                    <span className="px-3 py-1 bg-indigo-500 text-white rounded-full text-sm">
+                      {selectedGroup} Group
+                    </span>
+                  )}
+                  {selectedSubject && (
+                    <span className="px-3 py-1 bg-indigo-400 text-white rounded-full text-sm">
+                      {selectedSubject}
+                    </span>
+                  )}
+                </div>
 
-              {subjects.map((subject) => (
-                <button
-                  key={subject}
-                  onClick={() => handleSubjectFilter(subject)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                    selectedSubject === subject
-                      ? "bg-indigo-600 text-white"
-                      : "bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 text-gray-700"
-                  }`}
-                >
-                  {subject}
-                </button>
-              ))}
-            </div>
+                {/* Show Groups if available */}
+                {currentLevelGroups.length > 0 && !selectedGroup && (
+                  <div className="mt-4">
+                    <p className="text-sm font-medium text-gray-700 mb-2">Select Group:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {currentLevelGroups.map((group) => (
+                        <button
+                          key={group.value}
+                          onClick={() => handleGroupSelect(group.value)}
+                          className="px-4 py-2 bg-white border-2 border-indigo-600 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-colors text-sm font-medium"
+                        >
+                          {group.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Show Subjects */}
+                {currentLevelSubjects.length > 0 && (!currentLevelGroups.length || selectedGroup) && (
+                  <div className="mt-4">
+                    <p className="text-sm font-medium text-gray-700 mb-2">Filter by Subject:</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => setSelectedSubject(null)}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          !selectedSubject
+                            ? "bg-indigo-600 text-white"
+                            : "bg-white border border-gray-300 text-gray-700 hover:border-indigo-600 hover:text-indigo-600"
+                        }`}
+                      >
+                        All Subjects
+                      </button>
+                      {currentLevelSubjects.map((subject) => (
+                        <button
+                          key={subject}
+                          onClick={() => handleSubjectSelect(subject)}
+                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            selectedSubject === subject
+                              ? "bg-indigo-600 text-white"
+                              : "bg-white border border-gray-300 text-gray-700 hover:border-indigo-600 hover:text-indigo-600"
+                          }`}
+                        >
+                          {subject}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           {/* Resources List */}
           <section className="bg-white rounded-xl shadow-sm p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-bold text-gray-900">
-                {selectedSubject ? `${selectedSubject} Resources` : 'All Study Materials'}
+                {selectedLevel 
+                  ? `${selectedLevel} ${selectedSubject ? `- ${selectedSubject}` : ''} Resources` 
+                  : 'All Study Materials'}
               </h2>
               <span className="text-sm text-gray-500">
                 {resources.length} resources found
@@ -689,7 +690,7 @@ export default function HomePage() {
                   .filter(resource => 
                     query === "" || 
                     resource.title.toLowerCase().includes(query.toLowerCase()) ||
-                    resource.description.toLowerCase().includes(query.toLowerCase())
+                    (resource.description && resource.description.toLowerCase().includes(query.toLowerCase()))
                   )
                   .map((resource) => (
                     <div
@@ -703,10 +704,26 @@ export default function HomePage() {
                         </div>
                         <div className="flex-1">
                           <h3 className="font-semibold text-gray-900">{resource.title}</h3>
-                          <p className="text-sm text-gray-500">{resource.subject}</p>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            {resource.level && (
+                              <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">
+                                {resource.level}
+                              </span>
+                            )}
+                            {resource.group && (
+                              <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">
+                                {resource.group}
+                              </span>
+                            )}
+                            {resource.subjectCategory && (
+                              <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                                {resource.subjectCategory}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-gray-400 mt-1">
-                            {resource.description.substring(0, 80)}
-                            {resource.description.length > 80 ? '...' : ''}
+                            {resource.description?.substring(0, 80)}
+                            {resource.description?.length > 80 ? '...' : ''}
                           </p>
                           <p className="text-xs text-gray-400 mt-1">
                             Uploaded by {resource.uploadedBy?.name || 'Unknown'}
@@ -798,27 +815,12 @@ export default function HomePage() {
                         </div>
                         <div className="flex-1">
                           <h3 className="font-semibold text-gray-900">{doc.title}</h3>
-                          <p className="text-sm text-gray-500">{doc.subject}</p>
+                          <p className="text-sm text-gray-500">{doc.subjectCategory || doc.subject}</p>
                           <p className="text-xs text-gray-400 mt-1">
-                            {doc.description.substring(0, 60)}
-                            {doc.description.length > 60 ? '...' : ''}
-                          </p>
-                          {documentListType === 'downloaded' && doc.uploadedBy && (
-                            <p className="text-xs text-gray-400 mt-1">
-                              Uploaded by {doc.uploadedBy.name}
-                            </p>
-                          )}
-                          <p className="text-xs text-gray-400 mt-1">
-                            {new Date(doc.createdAt).toLocaleDateString()}
+                            {doc.description?.substring(0, 60)}
+                            {doc.description?.length > 60 ? '...' : ''}
                           </p>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {doc.downloadCount !== undefined && (
-                          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                            {doc.downloadCount} downloads
-                          </span>
-                        )}
                       </div>
                     </div>
                   ))}
@@ -838,250 +840,28 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Upload Modal */}
-      {showUploadModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 relative max-h-[90vh] overflow-y-auto">
-            <button
-              onClick={() => setShowUploadModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl"
-            >
-              ✕
-            </button>
-            <h2 className="text-2xl font-bold mb-4 text-gray-900">Upload Resource</h2>
-            <form onSubmit={handleUploadSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                <input
-                  type="text"
-                  required
-                  value={uploadForm.title}
-                  onChange={(e) =>
-                    setUploadForm({ ...uploadForm, title: e.target.value })
-                  }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Resource Title"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
-                <select
-                  required
-                  value={uploadForm.subject}
-                  onChange={handleSubjectChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="">Select Subject</option>
-                  {subjects.map((subject) => (
-                    <option key={subject} value={subject}>
-                      {subject}
-                    </option>
-                  ))}
-                  <option value="Other">Other (Add New Subject)</option>
-                </select>
-                {uploadForm.subject === "Other" && (
-                  <input
-                    type="text"
-                    required
-                    value={uploadForm.newSubject}
-                    onChange={handleNewSubjectChange}
-                    placeholder="Enter new subject"
-                    className="mt-2 w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                <textarea
-                  required
-                  value={uploadForm.description}
-                  onChange={(e) =>
-                    setUploadForm({ ...uploadForm, description: e.target.value })
-                  }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Brief description"
-                  rows={3}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">File</label>
-                <input
-                  type="file"
-                  required
-                  onChange={handleFileChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  accept=".pdf,.doc,.docx,.ppt,.pptx,.txt"
-                />
-                {uploadForm.file && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Selected: {uploadForm.file.name}
-                  </p>
-                )}
-              </div>
-              <button
-                type="submit"
-                disabled={uploading}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors disabled:bg-gray-400"
-              >
-                {uploading ? "Uploading..." : "Upload"}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Upload Modal - Updated with new fields */}
+      {showUploadModal && <UploadModal 
+        uploadForm={uploadForm}
+        setUploadForm={setUploadForm}
+        handleUploadSubmit={handleUploadSubmit}
+        handleFileChange={handleFileChange}
+        uploading={uploading}
+        setShowUploadModal={setShowUploadModal}
+      />}
 
       {/* Auth Modal */}
-      {showAuthModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 relative">
-            <button
-              onClick={() => setShowAuthModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl"
-            >
-              ✕
-            </button>
-
-            <div className="mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                {authMode === "login" ? "Welcome Back!" : "Create Account"}
-              </h2>
-              <p className="text-gray-600">
-                {authMode === "login"
-                  ? "Login to access all features"
-                  : "Sign up to start sharing and downloading materials"}
-              </p>
-            </div>
-
-            {/* Toggle Buttons */}
-            <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-lg">
-              <button
-                onClick={() => setAuthMode("login")}
-                className={`flex-1 py-2 rounded-md font-medium transition-all ${
-                  authMode === "login"
-                    ? "bg-white text-indigo-600 shadow-sm"
-                    : "text-gray-600"
-                }`}
-              >
-                Login
-              </button>
-              <button
-                onClick={() => setAuthMode("signup")}
-                className={`flex-1 py-2 rounded-md font-medium transition-all ${
-                  authMode === "signup"
-                    ? "bg-white text-indigo-600 shadow-sm"
-                    : "text-gray-600"
-                }`}
-              >
-                Sign Up
-              </button>
-            </div>
-
-            {/* Login Form */}
-            {authMode === "login" && (
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={loginForm.email}
-                    onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="your.email@university.edu"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={loginForm.password}
-                    onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="Enter your password"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors"
-                >
-                  Login
-                </button>
-              </form>
-            )}
-
-            {/* Signup Form */}
-            {authMode === "signup" && (
-              <form onSubmit={handleSignup} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Full Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={signupForm.name}
-                    onChange={(e) => setSignupForm({ ...signupForm, name: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="John Doe"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={signupForm.email}
-                    onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="your.email@university.edu"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={signupForm.password}
-                    onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="Create a password"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Confirm Password
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={signupForm.confirmPassword}
-                    onChange={(e) =>
-                      setSignupForm({ ...signupForm, confirmPassword: e.target.value })
-                    }
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="Confirm your password"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors"
-                >
-                  Sign Up
-                </button>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
+      {showAuthModal && <AuthModal 
+        authMode={authMode}
+        setAuthMode={setAuthMode}
+        loginForm={loginForm}
+        setLoginForm={setLoginForm}
+        signupForm={signupForm}
+        setSignupForm={setSignupForm}
+        handleLogin={handleLogin}
+        handleSignup={handleSignup}
+        setShowAuthModal={setShowAuthModal}
+      />}
 
       {/* Document Viewer Modal */}
       {selectedDocument && (
@@ -1093,76 +873,299 @@ export default function HomePage() {
           canDownload={canDownload}
         />
       )}
+    </div>
+  );
+}
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="text-center mb-12">
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2">
-            {popularMode ? 'Most Popular Documents' : 'All Documents'}
-          </h1>
-          <p className="text-gray-600 mb-6">
-            {popularMode
-              ? 'Explore the top 10 most downloaded documents.'
-              : 'Find and share study materials with your peers.'}
-          </p>
+// Upload Modal Component
+function UploadModal({ uploadForm, setUploadForm, handleUploadSubmit, handleFileChange, uploading, setShowUploadModal }) {
+  const categories = getAllCategories();
+  const levels = uploadForm.category ? getLevelsForCategory(uploadForm.category) : [];
+  const groups = uploadForm.category && uploadForm.level ? getGroupsForLevel(uploadForm.category, uploadForm.level) : [];
+  const subjects = uploadForm.category && uploadForm.level ? getSubjectsForLevel(uploadForm.category, uploadForm.level, uploadForm.group) : [];
 
-          {/* Most Popular button (added) */}
-          <div className="mb-6">
-            <button
-              onClick={fetchPopular}
-              className={`inline-flex items-center gap-2 px-6 py-3 rounded-full font-semibold transition-all ${
-                viewMode === 'popular'
-                  ? 'bg-indigo-600 text-white shadow-lg'
-                  : 'bg-white text-indigo-600 border-2 border-indigo-600 hover:bg-indigo-50'
-              }`}
-              aria-label="Show most popular documents"
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 relative max-h-[90vh] overflow-y-auto">
+        <button
+          onClick={() => setShowUploadModal(false)}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl"
+        >
+          ✕
+        </button>
+        <h2 className="text-2xl font-bold mb-4 text-gray-900">Upload Resource</h2>
+        <form onSubmit={handleUploadSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+            <input
+              type="text"
+              required
+              value={uploadForm.title}
+              onChange={(e) => setUploadForm({ ...uploadForm, title: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="Resource Title"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+            <select
+              required
+              value={uploadForm.category}
+              onChange={(e) => setUploadForm({ ...uploadForm, category: e.target.value, level: '', group: '', subjectCategory: '', topic: '' })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
-              <span className="material-icons-outlined text-xl">trending_up</span>
-              Most Popular
-            </button>
-            {viewMode === 'popular' && (
-              <button
-                onClick={fetchAll}
-                className="ml-3 inline-flex items-center gap-2 px-6 py-3 rounded-full font-semibold bg-white text-gray-700 border-2 border-gray-300 hover:bg-gray-50 transition-all"
+              <option value="">Select Category</option>
+              {categories.map((cat) => (
+                <option key={cat.key} value={cat.key}>
+                  {cat.display}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {uploadForm.category && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Level/Class *</label>
+              <select
+                required
+                value={uploadForm.level}
+                onChange={(e) => setUploadForm({ ...uploadForm, level: e.target.value, group: '', subjectCategory: '', topic: '' })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
-                <span className="material-icons-outlined text-xl">view_list</span>
-                Show All
-              </button>
+                <option value="">Select Level</option>
+                {levels.map((level) => (
+                  <option key={level.value} value={level.value}>
+                    {level.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {groups.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Group</label>
+              <select
+                value={uploadForm.group}
+                onChange={(e) => setUploadForm({ ...uploadForm, group: e.target.value, subjectCategory: '' })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Select Group (Optional)</option>
+                {groups.map((group) => (
+                  <option key={group.value} value={group.value}>
+                    {group.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {subjects.length > 0 && uploadForm.level && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Subject *</label>
+              <select
+                required
+                value={uploadForm.subjectCategory}
+                onChange={(e) => setUploadForm({ ...uploadForm, subjectCategory: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Select Subject</option>
+                {subjects.map((subject) => (
+                  <option key={subject} value={subject}>
+                    {subject}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {uploadForm.category === 'UNDER_GRADUATE' && uploadForm.level && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Topic (Optional)</label>
+              <input
+                type="text"
+                value={uploadForm.topic}
+                onChange={(e) => setUploadForm({ ...uploadForm, topic: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="e.g., Data Structures"
+              />
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+            <textarea
+              required
+              value={uploadForm.description}
+              onChange={(e) => setUploadForm({ ...uploadForm, description: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="Brief description"
+              rows={3}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">File *</label>
+            <input
+              type="file"
+              required
+              onChange={handleFileChange}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              accept=".pdf,.doc,.docx,.ppt,.pptx,.txt"
+            />
+            {uploadForm.file && (
+              <p className="text-xs text-gray-500 mt-1">
+                Selected: {uploadForm.file.name}
+              </p>
             )}
           </div>
+
+          <button
+            type="submit"
+            disabled={uploading}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors disabled:bg-gray-400"
+          >
+            {uploading ? "Uploading..." : "Upload"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Auth Modal Component
+function AuthModal({ authMode, setAuthMode, loginForm, setLoginForm, signupForm, setSignupForm, handleLogin, handleSignup, setShowAuthModal }) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 relative">
+        <button
+          onClick={() => setShowAuthModal(false)}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl"
+        >
+          ✕
+        </button>
+
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            {authMode === "login" ? "Welcome Back!" : "Create Account"}
+          </h2>
+          <p className="text-gray-600">
+            {authMode === "login"
+              ? "Login to access all features"
+              : "Sign up to start sharing and downloading materials"}
+          </p>
         </div>
 
-        {/* Documents section title can reflect mode if you want */}
-        {/* Example: */}
-        {/* <h2>{popularMode ? 'Most Popular Documents' : 'All Documents'}</h2> */}
+        <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-lg">
+          <button
+            onClick={() => setAuthMode("login")}
+            className={`flex-1 py-2 rounded-md font-medium transition-all ${
+              authMode === "login"
+                ? "bg-white text-indigo-600 shadow-sm"
+                : "text-gray-600"
+            }`}
+          >
+            Login
+          </button>
+          <button
+            onClick={() => setAuthMode("signup")}
+            className={`flex-1 py-2 rounded-md font-medium transition-all ${
+              authMode === "signup"
+                ? "bg-white text-indigo-600 shadow-sm"
+                : "text-gray-600"
+            }`}
+          >
+            Sign Up
+          </button>
+        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {resources.map((resource) => (
-            <div
-              key={resource._id}
-              className="bg-white rounded-lg shadow-md overflow-hidden transition-transform transform hover:scale-105 cursor-pointer"
-              onClick={() => handleOpenDocument(resource)}
-            >
-              <div className="p-4">
-                <h3 className="text-lg font-semibold text-gray-900">{resource.title}</h3>
-                <p className="text-sm text-gray-500">{resource.subject}</p>
-                <p className="text-xs text-gray-400 mt-1">
-                  {resource.description.substring(0, 60)}
-                  {resource.description.length > 60 ? '...' : ''}
-                </p>
-              </div>
-              <div className="flex items-center justify-between p-4 bg-gray-50 border-t">
-                <span className="text-xs text-gray-500">
-                  Uploaded by {resource.uploadedBy?.name || 'Unknown'}
-                </span>
-                <span className="flex items-center gap-1 text-indigo-600">
-                  <span className="material-icons-outlined text-base">download</span>
-                  {popularMode && resource.downloads}
-                </span>
-              </div>
+        {authMode === "login" ? (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input
+                type="email"
+                required
+                value={loginForm.email}
+                onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="your.email@university.edu"
+              />
             </div>
-          ))}
-        </div>
-      </main>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input
+                type="password"
+                required
+                value={loginForm.password}
+                onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Enter your password"
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors"
+            >
+              Login
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleSignup} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+              <input
+                type="text"
+                required
+                value={signupForm.name}
+                onChange={(e) => setSignupForm({ ...signupForm, name: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="John Doe"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input
+                type="email"
+                required
+                value={signupForm.email}
+                onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="your.email@university.edu"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input
+                type="password"
+                required
+                value={signupForm.password}
+                onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Create a password"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+              <input
+                type="password"
+                required
+                value={signupForm.confirmPassword}
+                onChange={(e) => setSignupForm({ ...signupForm, confirmPassword: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Confirm your password"
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors"
+            >
+              Sign Up
+            </button>
+          </form>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 
 const API_URL = 'http://localhost:5000/api';
@@ -17,6 +17,12 @@ export default function DocumentViewer() {
   const [zoom, setZoom] = useState(125); // PDF.js viewer zoom (%)
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [uploads, setUploads] = useState(0);
+  const viewerFrameRef = useRef(null);
+  const viewerShellRef = useRef(null);
+  const [autoScrollActive, setAutoScrollActive] = useState(false);
+  const [autoScrollAnchor, setAutoScrollAnchor] = useState({ x: 0, y: 0 });
+  const autoScrollTimerRef = useRef(null);
+  const autoScrollDeltaRef = useRef({ y: 0 });
 
   const canDownload = uploads >= 3;
   const isPdf = resource && ext(resource.fileName) === 'pdf';
@@ -31,10 +37,10 @@ export default function DocumentViewer() {
       // Use preview endpoint for restricted users, full view for authorized users
       const endpoint = shouldShowPreview ? 'preview' : 'view';
       const file = `${FILE_ORIGIN}/api/resource/${endpoint}/${id}`;
-      return `/pdf-viewer/index.html?file=${encodeURIComponent(file)}#zoom=${zoom}`;
+      return `/pdf-viewer/index.html?file=${encodeURIComponent(file)}`;
     }
     return resource.fileUrl ? `${FILE_ORIGIN}${resource.fileUrl}` : null;
-  }, [resource, id, zoom, shouldShowPreview]);
+  }, [resource, id, shouldShowPreview]);
 
   useEffect(() => {
     const run = async () => {
@@ -64,17 +70,74 @@ export default function DocumentViewer() {
   const zoomOut = useCallback(() => setZoom(z => Math.max(25, z - 25)), []);
   const zoomReset = useCallback(() => setZoom(125), []);
 
+  const postToViewer = useCallback(payload => {
+    const frame = viewerFrameRef.current;
+    frame?.contentWindow?.postMessage(payload, '*');
+  }, []);
+
+  const scrollViewerBy = useCallback(deltaY => {
+    postToViewer({ type: 'scrollBy', dy: deltaY });
+  }, [postToViewer]);
+
+  const scrollViewerTo = useCallback(pos => {
+    postToViewer({ type: 'scrollTo', pos });
+  }, [postToViewer]);
+
+
+  const stopAutoScroll = useCallback(() => {
+    setAutoScrollActive(false);
+    autoScrollDeltaRef.current = { y: 0 };
+    if (autoScrollTimerRef.current) {
+      clearInterval(autoScrollTimerRef.current);
+      autoScrollTimerRef.current = null;
+    }
+  }, []);
+
+  const toggleAutoScroll = useCallback(e => {
+    if (autoScrollActive) {
+      stopAutoScroll();
+      return;
+    }
+    setAutoScrollAnchor({ x: e.clientX, y: e.clientY });
+    autoScrollDeltaRef.current = { y: 0 };
+    setAutoScrollActive(true);
+  }, [autoScrollActive, stopAutoScroll]);
+
   useEffect(() => {
     const onKey = e => {
+      const targetTag = e.target?.tagName?.toLowerCase();
+      const isTyping = targetTag === 'input' || targetTag === 'textarea';
+      if (isTyping) return;
+
       const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
-      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn(); }
-      if (e.key === '-') { e.preventDefault(); zoomOut(); }
-      if (e.key === '0') { e.preventDefault(); zoomReset(); }
+
+      // Zoom controls
+      if (mod && (e.key === '+' || e.key === '=')) { e.preventDefault(); zoomIn(); return; }
+      if (mod && e.key === '-') { e.preventDefault(); zoomOut(); return; }
+      if (mod && e.key === '0') { e.preventDefault(); zoomReset(); return; }
+
+      // Scrolling controls
+      const fastStep = window.innerHeight * 0.9;
+      if (e.key === 'ArrowDown') { e.preventDefault(); scrollViewerBy(120); }
+      if (e.key === 'ArrowUp') { e.preventDefault(); scrollViewerBy(-120); }
+      if (e.key === 'PageDown') { e.preventDefault(); scrollViewerBy(fastStep); }
+      if (e.key === 'PageUp') { e.preventDefault(); scrollViewerBy(-fastStep); }
+      if (e.key === ' ') { e.preventDefault(); scrollViewerBy(e.shiftKey ? -fastStep : fastStep); }
+      if (e.key === 'Home') { e.preventDefault(); scrollViewerTo(0); }
+      if (e.key === 'End') {
+        e.preventDefault();
+        scrollViewerTo('bottom');
+      }
+
+      // Cancel auto-scroll
+      if (e.key === 'Escape' && autoScrollActive) {
+        stopAutoScroll();
+      }
     };
+
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [zoomIn, zoomOut, zoomReset]);
+  }, [zoomIn, zoomOut, zoomReset, scrollViewerBy, scrollViewerTo, autoScrollActive, stopAutoScroll]);
 
   const handleDownload = useCallback(async () => {
     if (!isAuthenticated) return alert('Please login to download.');
@@ -102,6 +165,89 @@ export default function DocumentViewer() {
       alert('Error downloading file.');
     }
   }, [id, isAuthenticated, canDownload, uploads, resource]);
+
+  // Mouse / touchpad zoom (pinch-to-zoom triggers wheel+ctrl)
+  useEffect(() => {
+    const el = viewerShellRef.current || window;
+    const onWheel = e => {
+      if (!isPdf) return;
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const direction = Math.sign(e.deltaY);
+        if (direction > 0) zoomOut(); else zoomIn();
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [isPdf, zoomIn, zoomOut]);
+
+  // Keep zoom inside PDF.js without altering iframe URL (avoids history spam on back button)
+  useEffect(() => {
+    if (!isPdf) return;
+    postToViewer({ type: 'setZoom', zoom: zoom / 100 });
+  }, [isPdf, zoom, postToViewer]);
+
+  // Double-click zoom and middle-click auto-scroll
+  useEffect(() => {
+    const shell = viewerShellRef.current;
+    if (!shell) return;
+
+    const onDblClick = e => {
+      if (!isPdf) return;
+      e.preventDefault();
+      if (e.ctrlKey) zoomOut(); else zoomIn();
+    };
+
+    const onAuxClick = e => {
+      if (e.button === 1) {
+        e.preventDefault();
+        toggleAutoScroll(e);
+      }
+    };
+
+    shell.addEventListener('dblclick', onDblClick);
+    shell.addEventListener('auxclick', onAuxClick);
+    return () => {
+      shell.removeEventListener('dblclick', onDblClick);
+      shell.removeEventListener('auxclick', onAuxClick);
+    };
+  }, [isPdf, zoomIn, zoomOut, toggleAutoScroll]);
+
+  useEffect(() => {
+    if (!autoScrollActive) return undefined;
+
+    const onMove = e => {
+      autoScrollDeltaRef.current = { y: e.clientY - autoScrollAnchor.y };
+    };
+
+    const onUp = () => stopAutoScroll();
+
+    const onLeave = () => stopAutoScroll();
+
+    const onKeyEsc = e => { if (e.key === 'Escape') stopAutoScroll(); };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('mouseleave', onLeave);
+    document.addEventListener('keydown', onKeyEsc);
+
+    autoScrollTimerRef.current = setInterval(() => {
+      const speedY = autoScrollDeltaRef.current.y * 0.6;
+      if (Math.abs(speedY) < 2) return;
+      scrollViewerBy(speedY);
+    }, 16);
+
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('mouseleave', onLeave);
+      document.removeEventListener('keydown', onKeyEsc);
+      if (autoScrollTimerRef.current) {
+        clearInterval(autoScrollTimerRef.current);
+        autoScrollTimerRef.current = null;
+      }
+    };
+  }, [autoScrollActive, autoScrollAnchor, scrollViewerBy, stopAutoScroll]);
 
   return (
     <div className="flex flex-col h-screen bg-gray-900">
@@ -150,7 +296,12 @@ export default function DocumentViewer() {
       )}
 
       {/* Viewer */}
-      <div className="relative flex-1 overflow-hidden bg-gray-900">
+      <div
+        ref={viewerShellRef}
+        className="relative flex-1 overflow-hidden bg-gray-900"
+        style={{ touchAction: 'pan-y pinch-zoom' }}
+        onPointerDown={() => viewerFrameRef.current?.focus?.()}
+      >
         {loading ? (
           <div className="h-full w-full flex items-center justify-center text-gray-200">Loading document...</div>
         ) : error ? (
@@ -158,9 +309,28 @@ export default function DocumentViewer() {
         ) : !viewerUrl ? (
           <div className="h-full w-full flex items-center justify-center text-gray-200">No file URL</div>
         ) : isPdf ? (
-          <iframe title="PDF" src={viewerUrl} className="h-full w-full" style={{ border: 'none' }} />
+          <iframe
+            ref={viewerFrameRef}
+            title="PDF"
+            src={viewerUrl}
+            className="h-full w-full"
+            style={{ border: 'none', touchAction: 'pan-y pinch-zoom' }}
+            scrolling="yes"
+            tabIndex={0}
+            onLoad={() => {
+              postToViewer({ type: 'setZoom', zoom: zoom / 100 });
+            }}
+          />
         ) : (
-          <iframe title="Document" src={`${FILE_ORIGIN}${resource.fileUrl}`} className="h-full w-full" style={{ border: 'none' }} />
+          <iframe
+            ref={viewerFrameRef}
+            title="Document"
+            src={`${FILE_ORIGIN}${resource.fileUrl}`}
+            className="h-full w-full"
+            style={{ border: 'none', touchAction: 'pan-y pinch-zoom' }}
+            scrolling="yes"
+            tabIndex={0}
+          />
         )}
 
         {/* Bottom-right zoom controls (for PDFs) */}
@@ -177,6 +347,30 @@ export default function DocumentViewer() {
             </div>
           </div>
         )}
+
+        {/* Auto-scroll indicator */}
+        {autoScrollActive && (
+          <div
+            className="pointer-events-none absolute z-20 h-14 w-14 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-indigo-400 bg-white/90 shadow"
+            style={{ left: autoScrollAnchor.x, top: autoScrollAnchor.y }}
+          >
+            <div className="absolute inset-2 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-xs font-semibold">
+              Auto
+            </div>
+          </div>
+        )}
+
+        {/* Shortcut hint */}
+        <div className="pointer-events-none absolute left-4 bottom-4 text-xs text-white/70 space-y-1">
+          <div className="bg-black/40 backdrop-blur rounded px-3 py-2 shadow">
+            <div className="font-semibold text-white">Shortcuts</div>
+            <div>Zoom: Ctrl + / Ctrl - / 0</div>
+            <div>Scroll: arrows, PgUp/PgDn, Space/Shift+Space</div>
+            <div>Auto-scroll: Middle click to toggle, Esc to exit</div>
+            <div>Double-click: Zoom in (Ctrl+Double-click to zoom out)</div>
+            <div>Pinch: Trackpad pinch to zoom</div>
+          </div>
+        </div>
       </div>
     </div>
   );

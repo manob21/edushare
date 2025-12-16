@@ -12,8 +12,18 @@
     }
     #pages.grabbing { cursor: grabbing; }
     canvas { display: block; margin: 0 auto 16px; background:#0f172a; }
-    #msg { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; color:#cbd5e1; }
-    .hidden { display:none; }
+    #msg {
+      position:fixed; left:50%; top:18px; transform:translateX(-50%);
+      padding:8px 12px; border-radius:12px;
+      background:rgba(17,24,39,0.88); color:#cbd5e1;
+      box-shadow:0 8px 24px rgba(0,0,0,0.35);
+      pointer-events:none;
+      z-index:60;
+      display:flex; align-items:center; justify-content:center;
+      min-width:140px; text-align:center;
+    }
+    .hidden { display:none !important; }
+    #msg.hidden { display:none !important; }
 
     /* Gating notice (appears when preview-only) */
     #gate {
@@ -53,6 +63,7 @@
 
     let pdfDoc = null;
     let zoom = 1;
+    let canViewFull = false;
 
     function parseZoomFromHash() {
       const m = /zoom=(\d+)/.exec(location.hash);
@@ -88,6 +99,24 @@
       }
     }
 
+    async function renderPages(maxPagesOverride) {
+      if (!pdfDoc) return;
+      const total = pdfDoc.numPages;
+      const maxPages = maxPagesOverride ?? (canViewFull ? total : Math.min(total, 5));
+
+      pages.innerHTML = '';
+      for (let p = 1; p <= maxPages; p++) {
+        const page = await pdfDoc.getPage(p);
+        const viewport = page.getViewport({ scale: zoom });
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        pages.appendChild(canvas);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      }
+    }
+
     async function renderAll() {
       if (!fileUrl) {
         msg.textContent = 'No file parameter.';
@@ -97,7 +126,7 @@
       msg.classList.remove('hidden');
 
       const { isAuthenticated, uploadCount } = await getAuthState();
-      const canViewFull = isAuthenticated && uploadCount >= 3;
+      canViewFull = isAuthenticated && uploadCount >= 3;
       const pageLimit = canViewFull ? Number.POSITIVE_INFINITY : 5;
 
       zoom = parseZoomFromHash();
@@ -111,20 +140,7 @@
       }).promise;
 
       // Render pages (respect limit)
-      pages.innerHTML = '';
-      const total = pdfDoc.numPages;
-      const maxPages = Math.min(total, pageLimit);
-
-      for (let p = 1; p <= maxPages; p++) {
-        const page = await pdfDoc.getPage(p);
-        const viewport = page.getViewport({ scale: zoom });
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d', { alpha: false });
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        pages.appendChild(canvas);
-        await page.render({ canvasContext: ctx, viewport }).promise;
-      }
+      await renderPages(Math.min(pdfDoc.numPages, pageLimit));
 
       msg.classList.add('hidden');
 
@@ -152,31 +168,7 @@
       msg.classList.remove('hidden');
       const total = pdfDoc.numPages;
 
-      // Re-evaluate gating on zoom changes (no extra auth call needed)
-      const token = localStorage.getItem('token');
-      let canViewFull = false;
-      if (token) {
-        try {
-          const r = await fetch(`${API_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
-          if (r.ok) {
-            const d = await r.json();
-            canViewFull = (d?.user?.uploadCount ?? 0) >= 3;
-          }
-        } catch {}
-      }
-      const maxPages = canViewFull ? total : Math.min(total, 5);
-
-      pages.innerHTML = '';
-      for (let p = 1; p <= maxPages; p++) {
-        const page = await pdfDoc.getPage(p);
-        const viewport = page.getViewport({ scale: zoom });
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d', { alpha: false });
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        pages.appendChild(canvas);
-        await page.render({ canvasContext: ctx, viewport }).promise;
-      }
+      await renderPages();
       msg.classList.add('hidden');
     });
 
@@ -199,13 +191,8 @@
       }
     });
 
-    // Wheel scroll: ensure container scrolls
-    pages.addEventListener('wheel', (e) => {
-      if (e.ctrlKey) return; // browser zoom
-      e.preventDefault();
-      const factor = (e.deltaMode === 1) ? 16 : 1;
-      pages.scrollBy({ top: e.deltaY * factor, left: e.deltaX * factor, behavior: 'auto' });
-    }, { passive: false });
+    // Wheel scroll: allow native scrolling (no preventDefault) for smooth touchpad/scrollbar behavior
+    pages.addEventListener('wheel', () => {}, { passive: true });
 
     // Grab-to-pan (mouse/pen/touch)
     let panning = false, pointerId = null, startX = 0, startY = 0, sL = 0, sT = 0;
@@ -232,6 +219,29 @@
       document.removeEventListener('pointercancel', endPan);
     };
     pages.addEventListener('pointerdown', beginPan);
+
+    // Listen for messages from parent (zoom and scroll commands)
+    window.addEventListener('message', async (event) => {
+      const data = event.data || {};
+      if (data.type === 'setZoom') {
+        const z = Math.max(0.25, Math.min(4, Number(data.zoom) || 1));
+        if (Math.abs(z - zoom) < 0.0001) return;
+        zoom = z;
+        if (!pdfDoc) return;
+        msg.classList.remove('hidden');
+        await renderPages();
+        msg.classList.add('hidden');
+      }
+      if (data.type === 'scrollBy') {
+        const dy = Number(data.dy) || 0;
+        const dx = Number(data.dx) || 0;
+        pages.scrollBy({ top: dy, left: dx, behavior: 'smooth' });
+      }
+      if (data.type === 'scrollTo') {
+        const top = data.pos === 'bottom' ? pages.scrollHeight : Number(data.pos) || 0;
+        pages.scrollTo({ top, behavior: 'smooth' });
+      }
+    });
 
     // Start
     renderAll().catch(err => {

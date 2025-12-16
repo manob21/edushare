@@ -3,8 +3,19 @@ const mongoose = require('mongoose');
 const ResourceSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
-    subject: { type: String, required: true },
+    subject: { type: String, required: true }, // Keep for backward compatibility
     description: { type: String },
+
+    // New hierarchical categorization fields
+    category: { 
+      type: String,
+      // Accept frontend category keys
+      enum: ['PRIMARY', 'SECONDARY', 'HIGHER_SECONDARY', 'UNDER_GRADUATE', 'POST_GRADUATE', 'JOB', 'OTHER']
+    },
+    level: { type: String }, // e.g., "Class 1", "Class 9", "CSE", "BCS"
+    group: { type: String }, // e.g., "Science", "Commerce", "Humanities" (for 9-12)
+    subjectCategory: { type: String }, // The actual subject like "Mathematics", "Bangla"
+    topic: { type: String }, // For under-graduate/post-graduate major topics
 
     uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 

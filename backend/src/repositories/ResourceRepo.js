@@ -10,6 +10,19 @@ class ResourceRepo {
   async findBySubject(subject) {
     return Resource.find({ subject: new RegExp(subject, 'i') }).populate('uploadedBy', 'name email').sort({ createdAt: -1 });
   }
+  
+  // New hierarchical filtering method
+  async findByFilters(filters) {
+    const query = {};
+    if (filters.category) query.category = filters.category;
+    if (filters.level) query.level = filters.level;
+    if (filters.group) query.group = filters.group;
+    if (filters.subject) query.subjectCategory = new RegExp(filters.subject, 'i');
+    if (filters.topic) query.topic = new RegExp(filters.topic, 'i');
+    
+    return Resource.find(query).populate('uploadedBy', 'name email').sort({ createdAt: -1 });
+  }
+  
   async findById(id) { return Resource.findById(id); }
   async myUploads(userId) { return Resource.find({ uploadedBy: userId }).sort({ createdAt: -1 }); }
   async incDownloads(id, n = 1) { return Resource.findByIdAndUpdate(id, { $inc: { downloads: n } }, { new: true }); }

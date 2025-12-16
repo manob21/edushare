@@ -27,6 +27,19 @@ exports.listBySubject = asyncHandler(async (req, res) => {
   res.json({ success: true, resources });
 });
 
+// New hierarchical filtering endpoint
+exports.filterResources = asyncHandler(async (req, res) => {
+  const filters = {
+    category: req.query.category,
+    level: req.query.level,
+    group: req.query.group,
+    subject: req.query.subject,
+    topic: req.query.topic
+  };
+  const resources = await ResourceService.filterResources(filters);
+  res.json({ success: true, resources });
+});
+
 exports.myUploads = asyncHandler(async (req, res) => {
   const resources = await ResourceService.myUploads(req.user.id);
   res.json({ success: true, resources });
@@ -40,13 +53,13 @@ exports.myDownloads = asyncHandler(async (req, res) => {
 
 exports.upload = asyncHandler(async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No file' });
-  const { title, subject, description } = req.body;
+  const { title, subject, description, category, level, group, subjectCategory, topic } = req.body;
   const out = await ResourceService.upload({
     userId: req.user.id,
     file: req.file,
-    title, subject, description,
+    title, subject, description, category, level, group, subjectCategory, topic,
   });
-  res.status(201).json({ resource: out.doc, counters: out.counters });
+  res.status(201).json({ resource: out.doc, user: out.counters });
 });
 
 exports.view = asyncHandler(async (req, res) => {

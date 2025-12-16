@@ -10,17 +10,23 @@ class ResourceService {
   async listPopular() { return ResourceRepo.findPopular(10); }
   async listSubjects() { return ResourceRepo.distinctSubjects(); }
   async listBySubject(subject) { return ResourceRepo.findBySubject(subject); }
+  
+  // New hierarchical filtering
+  async filterResources(filters) {
+    return ResourceRepo.findByFilters(filters);
+  }
+  
   async getById(id) { return ResourceRepo.findById(id); }
   async myUploads(userId) { return ResourceRepo.myUploads(userId); }
   async myDownloads(userId) { return DownloadRepo.findResourcesByUser(userId, 100); }
 
-  async upload({ userId, file, title, subject, description }) {
+  async upload({ userId, file, title, subject, description, category, level, group, subjectCategory, topic }) {
     // Upload the full file
     const meta = await FileService.upload(file.buffer, file.originalname, file.mimetype, { uploader: userId });
 
     const resourceDoc = {
       title,
-      subject,
+      subject: subject || subjectCategory, // backward compatibility
       description,
       uploadedBy: userId,
       fileName: file.originalname,
@@ -29,6 +35,12 @@ class ResourceService {
       gridFsId: FileService.isGridFs() ? meta.id : undefined,
       fileSize: meta.length,
       fileUrl: FileService.isGridFs() ? undefined : meta.filePath,
+      // New hierarchical fields
+      category,
+      level,
+      group,
+      subjectCategory,
+      topic,
       // legacy optional
       name: file.originalname,
       url: FileService.isGridFs() ? undefined : meta.filePath,

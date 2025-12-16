@@ -16,6 +16,7 @@ router.get('/all', ResourceController.listAll);
 router.get('/popular', ResourceController.listPopular);
 router.get('/subjects', ResourceController.listSubjects);
 router.get('/subject/:subject', ResourceController.listBySubject);
+router.get('/filter', ResourceController.filterResources); // New hierarchical filter endpoint
 
 // User lists
 router.get('/my-uploads', protect, ResourceController.myUploads);
