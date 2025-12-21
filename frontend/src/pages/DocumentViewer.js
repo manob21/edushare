@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 
 const API_URL = 'http://localhost:5000/api';
 const FILE_ORIGIN = 'http://localhost:5000';
@@ -11,6 +11,7 @@ function ext(name = '') {
 
 export default function DocumentViewer() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [resource, setResource] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -282,7 +283,13 @@ export default function DocumentViewer() {
                 {!isAuthenticated ? (
                   <span>
                     <strong>Preview Mode:</strong> You're viewing the first 5 pages only. 
-                    <strong> Login</strong> and <strong>upload 3 documents</strong> to access full documents.
+                    <button 
+                      onClick={() => navigate('/auth/login')}
+                      className="ml-1 font-bold text-indigo-600 hover:text-indigo-700 underline cursor-pointer bg-transparent border-none p-0"
+                    >
+                      Sign in
+                    </button>
+                    {' '}and <strong>upload 3 documents</strong> to access full documents.
                   </span>
                 ) : (
                   <span>
