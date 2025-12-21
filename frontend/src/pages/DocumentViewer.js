@@ -25,6 +25,17 @@ export default function DocumentViewer() {
   const autoScrollTimerRef = useRef(null);
   const autoScrollDeltaRef = useRef({ y: 0 });
 
+  // Add auth modal states
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMode, setAuthMode] = useState("login");
+  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [signupForm, setSignupForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+  });
+
   const canDownload = uploads >= 3;
   const isPdf = resource && ext(resource.fileName) === 'pdf';
   
@@ -250,6 +261,75 @@ export default function DocumentViewer() {
     };
   }, [autoScrollActive, autoScrollAnchor, scrollViewerBy, stopAutoScroll]);
 
+  // Add login handler
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        alert(data.message || 'Login failed');
+        return;
+      }
+
+      localStorage.setItem('token', data.token);
+      setUploads(data.user.uploadCount);
+      setIsAuthenticated(true);
+      setShowAuthModal(false);
+      setLoginForm({ email: "", password: "" });
+      alert('Login successful!');
+      window.location.reload(); // Reload to fetch full document
+    } catch (error) {
+      console.error('Login error:', error);
+      alert('An error occurred during login');
+    }
+  };
+
+  // Add signup handler
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    
+    if (signupForm.password !== signupForm.confirmPassword) {
+      alert("Passwords do not match!");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/auth/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: signupForm.name,
+          email: signupForm.email,
+          password: signupForm.password,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        alert(data.message || 'Signup failed');
+        return;
+      }
+
+      localStorage.setItem('token', data.token);
+      setUploads(data.user.uploadCount);
+      setIsAuthenticated(true);
+      setShowAuthModal(false);
+      setSignupForm({ name: "", email: "", password: "", confirmPassword: "" });
+      alert('Account created successfully!');
+      window.location.reload(); // Reload to fetch full document
+    } catch (error) {
+      console.error('Signup error:', error);
+      alert('An error occurred during signup');
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-900">
       {/* Top bar (no back button) */}
@@ -284,7 +364,10 @@ export default function DocumentViewer() {
                   <span>
                     <strong>Preview Mode:</strong> You're viewing the first 5 pages only. 
                     <button 
-                      onClick={() => navigate('/auth/login')}
+                      onClick={() => {
+                        setAuthMode("login");
+                        setShowAuthModal(true);
+                      }}
                       className="ml-1 font-bold text-indigo-600 hover:text-indigo-700 underline cursor-pointer bg-transparent border-none p-0"
                     >
                       Sign in
@@ -297,6 +380,14 @@ export default function DocumentViewer() {
                   </span>
                 )}
               </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => navigate('/')}
+                className="bg-white hover:bg-gray-50 text-indigo-600 px-4 py-2 rounded-lg font-medium border-2 border-indigo-600 transition-colors"
+              >
+                Upload Documents
+              </button>
             </div>
           </div>
         </div>
@@ -378,6 +469,188 @@ export default function DocumentViewer() {
             <div>Pinch: Trackpad pinch to zoom</div>
           </div>
         </div>
+
+        {/* Bottom Preview Popup */}
+        {shouldShowPreview && isPdf && (
+          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 pointer-events-auto">
+            <div className="bg-white/95 backdrop-blur rounded-lg shadow-2xl px-6 py-4 border border-gray-200 flex items-center gap-4">
+              <div className="flex items-center gap-2 text-sm text-gray-700">
+                <span className="material-icons-outlined text-yellow-600 text-xl">info</span>
+                <p>
+                  <strong>Preview:</strong> showing first <strong>5 pages</strong>. Please sign in and upload at least <strong>3 documents</strong> to view the full PDF.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setAuthMode("login");
+                    setShowAuthModal(true);
+                  }}
+                  className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg font-medium border border-gray-300 transition-colors"
+                >
+                  Sign in
+                </button>
+                <button
+                  onClick={() => navigate('/')}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                >
+                  Upload now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Auth Modal */}
+      {showAuthModal && (
+        <AuthModal 
+          authMode={authMode}
+          setAuthMode={setAuthMode}
+          loginForm={loginForm}
+          setLoginForm={setLoginForm}
+          signupForm={signupForm}
+          setSignupForm={setSignupForm}
+          handleLogin={handleLogin}
+          handleSignup={handleSignup}
+          setShowAuthModal={setShowAuthModal}
+        />
+      )}
+    </div>
+  );
+}
+
+// Auth Modal Component (same as in HomePage.js)
+function AuthModal({ authMode, setAuthMode, loginForm, setLoginForm, signupForm, setSignupForm, handleLogin, handleSignup, setShowAuthModal }) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 relative">
+        <button
+          onClick={() => setShowAuthModal(false)}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl"
+        >
+          ✕
+        </button>
+
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            {authMode === "login" ? "Welcome Back!" : "Create Account"}
+          </h2>
+          <p className="text-gray-600">
+            {authMode === "login"
+              ? "Login to access all features"
+              : "Sign up to start sharing and downloading materials"}
+          </p>
+        </div>
+
+        <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-lg">
+          <button
+            onClick={() => setAuthMode("login")}
+            className={`flex-1 py-2 rounded-md font-medium transition-all ${
+              authMode === "login"
+                ? "bg-white text-indigo-600 shadow-sm"
+                : "text-gray-600"
+            }`}
+          >
+            Login
+          </button>
+          <button
+            onClick={() => setAuthMode("signup")}
+            className={`flex-1 py-2 rounded-md font-medium transition-all ${
+              authMode === "signup"
+                ? "bg-white text-indigo-600 shadow-sm"
+                : "text-gray-600"
+            }`}
+          >
+            Sign Up
+          </button>
+        </div>
+
+        {authMode === "login" ? (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input
+                type="email"
+                required
+                value={loginForm.email}
+                onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="your.email@university.edu"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input
+                type="password"
+                required
+                value={loginForm.password}
+                onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Enter your password"
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors"
+            >
+              Login
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleSignup} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+              <input
+                type="text"
+                required
+                value={signupForm.name}
+                onChange={(e) => setSignupForm({ ...signupForm, name: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="John Doe"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input
+                type="email"
+                required
+                value={signupForm.email}
+                onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="your.email@university.edu"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input
+                type="password"
+                required
+                value={signupForm.password}
+                onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Create a password"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+              <input
+                type="password"
+                required
+                value={signupForm.confirmPassword}
+                onChange={(e) => setSignupForm({ ...signupForm, confirmPassword: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Confirm your password"
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors"
+            >
+              Sign Up
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );
